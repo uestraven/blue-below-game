@@ -39,9 +39,16 @@ async function main() {
   const flat = files.filter((f) => !f.includes(path.sep) || true);
   check('dist/index.html exists', files.includes('index.html'));
   check('dist/_headers was copied from public/', files.includes('_headers'), flat.join(' '));
+  // Pages ignores wrangler.toml, so a 404.html is how unknown paths get a real
+  // 404 status there rather than the game served with HTTP 200.
+  check('dist/404.html exists for Cloudflare Pages', files.includes('404.html'));
 
   const html = await readFile(path.join(DIST, 'index.html'), 'utf8');
   check('no inline <script> in the shipped HTML (keeps the CSP strict)', !/<script(?![^>]*\ssrc=)/i.test(html));
+
+  const notFound = await readFile(path.join(DIST, '404.html'), 'utf8');
+  check('404.html has no inline <script> either', !/<script(?![^>]*\ssrc=)/i.test(notFound));
+  check('404.html is self-contained (no hashed stylesheet reference)', !/<link[^>]*stylesheet/i.test(notFound));
 
   const jsFiles = files.filter((f) => f.endsWith('.js'));
   check('exactly one JS bundle', jsFiles.length === 1, jsFiles.join(' '));

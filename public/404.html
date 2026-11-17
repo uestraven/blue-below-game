@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BLUE BELOW — nothing here</title>
+    <!-- Cloudflare Pages serves this with a real 404 status for any path that
+         does not match a file. Workers gets the same outcome from
+         `not_found_handling` in wrangler.toml, which Pages ignores.
+
+         Deliberately self-contained: the built stylesheet has a content-hashed
+         filename that a static file cannot reference. The <style> block is
+         allowed by the site's CSP, which includes style-src 'unsafe-inline'. -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #070a10;
+        color: #c2bba8;
+        font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
+      }
+      main {
+        display: flex;
+        min-height: 100%;
+        align-items: center;
+        justify-content: center;
+        padding: 6vh 6vw;
+      }
+      div {
+        max-width: 34rem;
+        border: 2px solid #2e3744;
+        padding: 2rem 2.25rem;
+      }
+      h1 {
+        margin: 0 0 0.25rem;
+        font-size: 2rem;
+        letter-spacing: 0.3em;
+        color: #39b6e8;
+      }
+      p.sub {
+        margin: 0 0 1.5rem;
+        font-size: 0.7rem;
+        letter-spacing: 0.26em;
+        color: #7b8794;
+      }
+      p {
+        line-height: 1.7;
+      }
+      a {
+        color: #d79a3c;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div>
+        <h1>404</h1>
+        <p class="sub">NOT ON THE FLOOR PLAN</p>
+        <p>
+          There is nothing at this address. The plan ends halfway through the
+          building, and this is past the end of it.
+        </p>
+        <p><a href="/">Back to the front door</a></p>
+      </div>
+    </main>
+  </body>
+</html>

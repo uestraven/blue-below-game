@@ -168,24 +168,69 @@ Nothing else needs configuring:
 
 ## What is verified and what is not
 
-Verified on this machine:
+**Verified live** against the deployed Pages project at
+`https://blue-below-game.pages.dev` (HTTP/2, certificate valid):
 
-- `wrangler deploy --dry-run` accepts the config and reads all 5 files from `dist/`
-- Wrangler's own parser reports **"Parsed 4 valid header rules"** from `_headers`
+- the game is served and is the right build — the deployed bundle filename
+  matches the local build hash exactly
+- Cloudflare applies **every** rule from `public/_headers` at the edge: the
+  full CSP, `x-content-type-options`, `referrer-policy`,
+  `permissions-policy`, `cross-origin-opener-policy`, and both cache rules
+  (`max-age=0, must-revalidate` on `/`, `immutable` on `/assets/*`)
+- `_headers` is **not** served as a file; Cloudflare excludes it from the
+  output as expected
+
+Verified locally:
+
+- `wrangler deploy --dry-run` accepts the config and reads every file in `dist/`
+- Wrangler's own parser reports "Parsed 4 valid header rules" from `_headers`
 - the game boots, renders and logs nothing with the production CSP applied
 - the release build has no debug table at runtime
-- the full acceptance suite still passes (259/259) against the test-mode build
+- the full acceptance suite passes (259/259) against the test-mode build
 
-**Not verified:** no actual deploy has happened, because that needs your
-Cloudflare credentials and is your call to make, not mine. So Cloudflare's
-edge behaviour — that it applies these `_headers` rules as written, and that
-`not_found_handling` and `html_handling` behave as configured — has only been
-validated by Wrangler locally, never observed live. The first deploy is worth
-checking with:
+**Not verified:** the Workers path (`wrangler deploy`) has never actually been
+deployed, so `not_found_handling` and `html_handling` are validated by Wrangler
+only. Local Workers emulation does not run on the build host, for the glibc
+reason above.
+
+## Pages and Workers differ on unknown paths
+
+Pages ignores `wrangler.toml`, so `not_found_handling = "none"` does not apply
+there. Without a `404.html`, Pages answers any unmatched path with the game and
+HTTP **200**, which makes a broken link look like it worked. `public/404.html`
+fixes that: Pages serves it with a real 404 status. It is deliberately
+self-contained, because the built stylesheet has a content-hashed name a static
+file cannot reference, and its `<style>` block is permitted by the site CSP.
+
+Confirm after a deploy:
 
 ```bash
-curl -sI https://blue-below.<your-subdomain>.workers.dev/ | grep -i -E 'content-security|cache-control|x-content-type'
-curl -s -o /dev/null -w '%{http_code}\n' https://blue-below.<your-subdomain>.workers.dev/nope   # expect 404
+H=https://blue-below-game.pages.dev
+curl -sI  "$H/" | grep -i -E 'content-security|cache-control|x-content-type'
+curl -s -o /dev/null -w '%{http_code}\n' "$H/nope"   # expect 404, not 200
 ```
 
-Local Workers emulation is also unverified here, for the glibc reason above.
+## If the site will not load at all
+
+`ERR_SSL_VERSION_OR_CIPHER_MISMATCH` and similar TLS errors happen before any
+HTTP request, so they are never caused by this code, the CSP or the headers.
+They mean the browser could not complete a TLS handshake with that hostname.
+Causes, most likely first:
+
+| Cause | Fix |
+|---|---|
+| A custom domain was added minutes ago and Universal SSL has not issued yet | Wait. Usually a few minutes, up to 24 h. The `*.pages.dev` URL works meanwhile |
+| The custom domain is a **multi-level** subdomain (`game.blue.example.com`) | Universal SSL covers the apex and `*.example.com` only, never `*.*.example.com`. Needs Advanced Certificate Manager, or use a single-level subdomain |
+| The domain's DNS is not on Cloudflare, or the record is grey-clouded | Point DNS at Cloudflare and enable the proxy |
+| Minimum TLS Version set unusually high for the zone | Lower it in SSL/TLS → Edge Certificates |
+| Hitting a `workers.dev` URL before that subdomain is enabled | Enable it in the Workers dashboard, or use Pages |
+
+Diagnose a specific hostname with:
+
+```bash
+curl -sSv https://<your-host>/ 2>&1 | grep -E 'SSL|TLS|subject|issuer|HTTP'
+openssl s_client -connect <your-host>:443 -servername <your-host> </dev/null 2>&1 | head -20
+```
+
+If `openssl` reports no peer certificate, the certificate has not been issued
+for that hostname yet — that is the first row of the table above.
