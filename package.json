@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "description": "Blue Below - a short first-person survival horror game in the style of a late-1990s PlayStation title.",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
   "type": "module",
   "scripts": {
     "play": "bash play.sh",

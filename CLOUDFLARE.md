@@ -142,11 +142,29 @@ set:
 | Setting | Value |
 |---|---|
 | Build command | `npm run build` |
-| Output directory | `dist` |
-| Node version | 20 or newer |
+| Build output directory | `dist` |
+| Root directory | leave blank (repo root) |
 
-`public/_headers` is picked up automatically. `wrangler.toml` is ignored by
-Pages, so the two paths do not conflict.
+Node version needs no dashboard setting: `.nvmrc` (`22`) and the `engines`
+field in `package.json` pin it, and Pages reads both. That pin matters — Vite 8
+requires Node `^20.19.0 || >=22.12.0`, and the legacy Pages default of Node 18
+cannot build this. If a build ever fails on a Node version, set a
+`NODE_VERSION` environment variable to `22` in the Pages project as a belt-and-
+braces override.
+
+Nothing else needs configuring:
+
+- `public/_headers` is copied into `dist/` by the build and picked up
+  automatically, so the CSP and caching rules apply on Pages exactly as they do
+  on Workers.
+- `wrangler.toml` is ignored by Pages, so the Workers and Pages paths do not
+  conflict. Use whichever you prefer.
+- `npm install` pulls devDependencies (Pages does this by default), which is
+  required: `tsc` and `vite` both live there. The `playwright` devDependency
+  has no install script in the pinned version, so no browsers are downloaded
+  during the build.
+- `.npmrc` pins the public npm registry, so the install does not depend on
+  whatever registry a given builder defaults to.
 
 ## What is verified and what is not
 
