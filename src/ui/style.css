@@ -1,0 +1,725 @@
+/* BLUE BELOW - interface styling.
+   The world is rendered at 320x224 and upscaled with nearest-neighbour; the
+   interface sits on top at full resolution so that puzzle controls, clue
+   letters and body text stay legible, which the design calls for explicitly. */
+
+:root {
+  --ink: #070a10;
+  --slate: #1b2230;
+  --steel: #2e3744;
+  --grey: #4a545f;
+  --pale: #7b8794;
+  --bone: #c2bba8;
+  --white: #e8e2cf;
+  --amber: #d79a3c;
+  --blood: #6d0f12;
+  --blood-lit: #a8181c;
+  --blue: #39b6e8;
+  --moss: #5f7a4e;
+  --mono: 'DejaVu Sans Mono', 'Courier New', monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  color: var(--bone);
+  font-family: var(--mono);
+  cursor: default;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+}
+
+#view {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+#ui {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ------------------------------------------------------------------ HUD */
+
+.hud-crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  margin: -1.5px 0 0 -1.5px;
+  background: rgba(232, 226, 207, 0.55);
+  box-shadow: 0 0 0 1px rgba(7, 10, 16, 0.8);
+}
+
+.hud-crosshair.aiming {
+  width: 15px;
+  height: 15px;
+  margin: -7.5px 0 0 -7.5px;
+  background: none;
+  border: 1px solid rgba(232, 226, 207, 0.8);
+  border-radius: 50%;
+  box-shadow: none;
+}
+
+.hud-crosshair.aiming::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  margin: -1.5px 0 0 -1.5px;
+  background: var(--blood-lit);
+}
+
+.hud-prompt {
+  position: absolute;
+  left: 50%;
+  top: 58%;
+  transform: translateX(-50%);
+  padding: 5px 12px;
+  background: rgba(7, 10, 16, 0.82);
+  border: 1px solid var(--grey);
+  color: var(--white);
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  text-shadow: 0 1px 0 #000;
+}
+
+.hud-prompt .key {
+  display: inline-block;
+  min-width: 18px;
+  margin-right: 7px;
+  padding: 0 4px;
+  text-align: center;
+  background: var(--bone);
+  color: var(--ink);
+  font-weight: bold;
+}
+
+.hud-prompt.disabled {
+  color: var(--pale);
+  border-color: var(--steel);
+}
+
+.hud-prompt.disabled .key {
+  background: var(--steel);
+  color: var(--pale);
+}
+
+.hud-bottom {
+  position: absolute;
+  left: 22px;
+  bottom: 18px;
+  font-size: 13px;
+  line-height: 1.55;
+  letter-spacing: 0.05em;
+  text-shadow: 0 1px 0 #000, 0 0 6px #000;
+}
+
+.hud-item {
+  color: var(--bone);
+}
+
+.hud-item .mark {
+  color: var(--amber);
+}
+
+.hud-item.diamond .mark {
+  color: var(--blue);
+}
+
+.hud-item.gun .mark {
+  color: var(--white);
+}
+
+.hud-item.spent .mark,
+.hud-item.spent {
+  color: var(--grey);
+}
+
+.hud-stamina {
+  position: absolute;
+  right: 22px;
+  bottom: 20px;
+  width: 128px;
+  height: 7px;
+  border: 1px solid var(--steel);
+  background: rgba(7, 10, 16, 0.7);
+}
+
+.hud-stamina > i {
+  display: block;
+  height: 100%;
+  background: var(--bone);
+  transition: width 0.08s linear;
+}
+
+.hud-stamina.low > i {
+  background: var(--blood-lit);
+}
+
+.hud-threat {
+  position: absolute;
+  right: 22px;
+  bottom: 36px;
+  width: 128px;
+  text-align: right;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--blood-lit);
+  opacity: 0;
+  transition: opacity 0.2s linear;
+}
+
+.hud-threat.on {
+  opacity: 1;
+}
+
+/* Directional demon indicator: a thin arc at the screen edge. */
+.hud-dir {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  opacity: 0;
+}
+
+.hud-dir > i {
+  position: absolute;
+  left: -3px;
+  top: -3px;
+  width: 6px;
+  height: 6px;
+  background: var(--blood-lit);
+}
+
+.hud-toast {
+  position: absolute;
+  left: 50%;
+  top: 22%;
+  transform: translateX(-50%);
+  max-width: 70%;
+  padding: 8px 16px;
+  text-align: center;
+  background: rgba(7, 10, 16, 0.86);
+  border-left: 3px solid var(--amber);
+  color: var(--white);
+  font-size: 14px;
+  line-height: 1.5;
+  opacity: 0;
+  transition: opacity 0.25s linear;
+}
+
+.hud-toast.on {
+  opacity: 1;
+}
+
+.hud-vhs {
+  position: absolute;
+  left: 22px;
+  top: 18px;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--grey);
+}
+
+/* --------------------------------------------------------------- screens */
+
+.screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  background: rgba(3, 5, 8, 0.93);
+  padding: 4vh 4vw;
+}
+
+.screen.transparent {
+  background: rgba(3, 5, 8, 0.72);
+}
+
+.panel {
+  width: min(760px, 100%);
+  max-height: 92vh;
+  overflow-y: auto;
+  padding: 26px 30px 24px;
+  background: var(--ink);
+  border: 2px solid var(--steel);
+  box-shadow: 0 0 0 1px #000, 0 18px 60px rgba(0, 0, 0, 0.8);
+  scrollbar-width: thin;
+  scrollbar-color: var(--steel) var(--ink);
+}
+
+.panel.wide {
+  width: min(900px, 100%);
+}
+
+.panel h1 {
+  margin: 0 0 4px;
+  font-size: 40px;
+  letter-spacing: 0.3em;
+  color: var(--blue);
+  text-shadow: 0 0 18px rgba(57, 182, 232, 0.25);
+}
+
+.panel h2 {
+  margin: 0 0 14px;
+  font-size: 17px;
+  letter-spacing: 0.22em;
+  color: var(--amber);
+  text-transform: uppercase;
+}
+
+.panel .sub {
+  margin: 0 0 22px;
+  color: var(--pale);
+  font-size: 12px;
+  letter-spacing: 0.26em;
+}
+
+.panel p {
+  margin: 0 0 14px;
+  font-size: 15px;
+  line-height: 1.68;
+  color: var(--bone);
+}
+
+.panel p.quote {
+  padding: 14px 18px;
+  border-left: 3px solid var(--blood);
+  background: rgba(109, 15, 18, 0.1);
+  color: var(--white);
+}
+
+.panel pre {
+  margin: 0 0 16px;
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--bone);
+  white-space: pre-wrap;
+}
+
+.panel .hint {
+  margin-top: 18px;
+  color: var(--pale);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+}
+
+.panel .danger {
+  color: var(--blood-lit);
+}
+
+.panel .good {
+  color: var(--moss);
+}
+
+.panel .cold {
+  color: var(--blue);
+}
+
+/* Buttons are keyboard-first: the selected one is highlighted. */
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.choices.stack {
+  flex-direction: column;
+}
+
+.btn {
+  padding: 11px 20px;
+  background: var(--slate);
+  border: 1px solid var(--grey);
+  color: var(--bone);
+  font-family: var(--mono);
+  font-size: 15px;
+  letter-spacing: 0.1em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--steel);
+  color: var(--white);
+}
+
+.btn.sel {
+  background: var(--bone);
+  border-color: var(--white);
+  color: var(--ink);
+  font-weight: bold;
+}
+
+.btn.danger.sel {
+  background: var(--blood-lit);
+  border-color: var(--blood-lit);
+  color: var(--white);
+}
+
+.btn .note {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  opacity: 0.75;
+  font-weight: normal;
+}
+
+.rows {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px 18px;
+  align-items: center;
+  margin: 14px 0 6px;
+  font-size: 14px;
+}
+
+.rows .label {
+  color: var(--pale);
+  letter-spacing: 0.08em;
+}
+
+.rows .value {
+  color: var(--white);
+}
+
+.slider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.slider .bar {
+  position: relative;
+  width: 190px;
+  height: 9px;
+  border: 1px solid var(--grey);
+  background: var(--slate);
+}
+
+.slider .bar > i {
+  display: block;
+  height: 100%;
+  background: var(--amber);
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  gap: 8px 16px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.kv .k {
+  color: var(--amber);
+  letter-spacing: 0.08em;
+}
+
+.kv .v {
+  color: var(--bone);
+}
+
+.journal-list {
+  display: grid;
+  grid-template-columns: 70px 70px 1fr;
+  gap: 8px 14px;
+  font-size: 15px;
+  align-items: center;
+}
+
+.journal-list .num {
+  color: var(--amber);
+  letter-spacing: 0.1em;
+}
+
+.journal-list .let {
+  font-size: 24px;
+  font-weight: bold;
+  color: var(--blood-lit);
+}
+
+.journal-list .let.unknown {
+  color: var(--steel);
+}
+
+.journal-list .where {
+  color: var(--pale);
+  font-size: 12px;
+}
+
+/* --------------------------------------------------------------- puzzles */
+
+.puzzle {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  background: rgba(3, 5, 8, 0.55);
+}
+
+.device {
+  width: min(680px, 94vw);
+  padding: 22px 26px 20px;
+  background: var(--ink);
+  border: 2px solid var(--grey);
+  box-shadow: 0 0 0 1px #000, 0 0 70px rgba(0, 0, 0, 0.85);
+}
+
+.device header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+
+.device header h2 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: 0.22em;
+  color: var(--amber);
+}
+
+.device header .tag {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--pale);
+}
+
+.device .readout {
+  display: flex;
+  gap: 14px;
+  align-items: stretch;
+  margin: 16px 0;
+}
+
+.readout .cell {
+  flex: 1;
+  padding: 12px 14px;
+  background: #04060a;
+  border: 1px solid var(--steel);
+  text-align: center;
+}
+
+.readout .cell .cap {
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  color: var(--pale);
+}
+
+.readout .cell .big {
+  margin-top: 6px;
+  font-size: 40px;
+  line-height: 1;
+  font-weight: bold;
+  color: var(--amber);
+}
+
+.readout .cell.target .big {
+  color: var(--bone);
+}
+
+.readout .cell.ok .big {
+  color: var(--moss);
+}
+
+.readout .cell.bad .big {
+  color: var(--blood-lit);
+}
+
+.controls-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.ctl {
+  flex: 1 1 110px;
+  min-width: 96px;
+  padding: 12px 8px 10px;
+  background: var(--slate);
+  border: 2px solid var(--steel);
+  text-align: center;
+  cursor: pointer;
+}
+
+.ctl .name {
+  font-size: 18px;
+  font-weight: bold;
+  letter-spacing: 0.08em;
+  color: var(--white);
+}
+
+.ctl .state {
+  margin-top: 6px;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--pale);
+}
+
+.ctl.on {
+  background: var(--moss);
+  border-color: #8fae77;
+}
+
+.ctl.on .state {
+  color: #e9f3e0;
+}
+
+.ctl.sel {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 2px rgba(215, 154, 60, 0.4);
+}
+
+.ctl.wheel .name {
+  font-size: 34px;
+  line-height: 1.1;
+}
+
+.ctl.action {
+  flex: 0 0 auto;
+  min-width: 118px;
+  background: var(--steel);
+}
+
+.ctl.action.sel {
+  background: var(--bone);
+}
+
+.ctl.action.sel .name {
+  color: var(--ink);
+}
+
+.ctl.locked {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.seqbar {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0 4px;
+}
+
+.seqbar .slot {
+  flex: 1;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #04060a;
+  border: 1px solid var(--steel);
+  font-size: 16px;
+  letter-spacing: 0.1em;
+  color: var(--steel);
+}
+
+.seqbar .slot.done {
+  background: var(--moss);
+  border-color: #8fae77;
+  color: var(--white);
+}
+
+.seqbar.fault .slot {
+  border-color: var(--blood-lit);
+  color: var(--blood-lit);
+}
+
+.device .msg {
+  margin-top: 16px;
+  min-height: 20px;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--pale);
+}
+
+.device .msg.ok {
+  color: var(--moss);
+}
+
+.device .msg.bad {
+  color: var(--blood-lit);
+}
+
+.device footer {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--steel);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--grey);
+}
+
+.device .frozen {
+  margin-top: 10px;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--blue);
+}
+
+/* ---------------------------------------------------------------- endings */
+
+.ending-art {
+  display: block;
+  width: min(640px, 92vw);
+  margin: 0 auto 22px;
+  image-rendering: pixelated;
+  border: 1px solid var(--steel);
+  background: #000;
+}
+
+.fade-black {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.5s linear;
+}
+
+.fade-black.on {
+  opacity: 1;
+}
+
+.center-note {
+  position: absolute;
+  left: 50%;
+  bottom: 12%;
+  transform: translateX(-50%);
+  text-align: center;
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  color: var(--pale);
+}

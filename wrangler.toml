@@ -1,0 +1,32 @@
+# Cloudflare Workers configuration for BLUE BELOW.
+#
+# The game is entirely client-side: no server code, no API, no database, no
+# secrets. So this is an assets-only Worker - there is no `main` script, and
+# Cloudflare just serves the three files in dist/ from its edge.
+#
+#   npm run cf:check    validate this config and the upload, without deploying
+#   npm run cf:dev      run it locally through the real Workers runtime
+#   npm run cf:deploy   verify the release build, then deploy
+#
+# `cf:deploy` needs you to be logged in (`npx wrangler login`) or to have
+# CLOUDFLARE_API_TOKEN set. Nothing here deploys on its own.
+
+name = "blue-below"
+compatibility_date = "2026-11-17"
+
+# Keep the toolchain from phoning home about how this repo is used.
+send_metrics = false
+
+[assets]
+directory = "./dist"
+
+# The game is one page with no client-side routing, so an unknown path is a
+# genuine mistake. Return a real 404 rather than quietly serving the game and
+# making a broken link look like it worked.
+not_found_handling = "none"
+
+# Serve /index.html at / and leave every other URL exactly as written.
+html_handling = "auto-trailing-slash"
+
+[observability]
+enabled = true

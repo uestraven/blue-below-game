@@ -1,0 +1,23 @@
+# Response headers for Cloudflare (Workers static assets and Pages both read
+# this file; Vite copies it from public/ into dist/ at build time).
+#
+# The game fetches nothing at runtime: no API, no CDN, no fonts, no analytics,
+# no telemetry. So the policy below is default-deny with the four things the
+# game genuinely needs opened up, and nothing else.
+
+/*
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Cross-Origin-Opener-Policy: same-origin
+  Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=(), usb=(), midi=(), serial=(), bluetooth=()
+
+# Vite content-hashes every filename, so these can never go stale.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# The entry point must not be cached, or a deploy would not reach anyone.
+/
+  Cache-Control: public, max-age=0, must-revalidate
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
