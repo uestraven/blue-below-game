@@ -25,6 +25,7 @@ export interface Progress {
   hasKey: boolean;
   powerRestored: boolean;
   doorUnlocked: boolean;
+  footlockerOpen: boolean;
   hasGun: boolean;
   roundSpent: boolean;
   demonDead: boolean;
@@ -95,6 +96,7 @@ export class RunState {
       hasKey: false,
       powerRestored: false,
       doorUnlocked: false,
+      footlockerOpen: false,
       hasGun: false,
       roundSpent: false,
       demonDead: false,

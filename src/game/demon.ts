@@ -81,8 +81,15 @@ export class Demon {
 
   private torso!: THREE.Mesh;
   private head!: THREE.Group;
+  private jaw!: THREE.Mesh;
+  /** Hip joints; the shin hangs off each as a child so the knee bends. */
   private legs: THREE.Mesh[] = [];
+  private shins: THREE.Mesh[] = [];
+  /** Shoulder joints, with the forearm as a child. */
   private arms: THREE.Mesh[] = [];
+  private forearms: THREE.Mesh[] = [];
+  private twitchTimer = 0;
+  private twitch = 0;
   private materials: THREE.ShaderMaterial[] = [];
   private eyeMat!: THREE.ShaderMaterial;
   private readonly tintColor = new THREE.Color();
@@ -90,19 +97,6 @@ export class Demon {
   constructor(psx: PsxRenderer, private readonly wb: WorldBuild) {
     const skin = SURFACE.demonSkin();
     const face = SURFACE.demonFace();
-
-    /** A box whose geometry hangs from y = 0 so the mesh rotation is a joint. */
-    const limb = (w: number, h: number, d: number, tex: THREE.Texture): THREE.Mesh => {
-      const g = new THREE.BoxGeometry(w, h, d);
-      g.translate(0, -h / 2, 0);
-      g.setAttribute(
-        'color',
-        new THREE.Float32BufferAttribute(new Array(g.attributes.position.count * 3).fill(1), 3),
-      );
-      const m = psx.createMaterial({ map: tex, jitter: 1, affine: 1, emissive: 0.1 });
-      this.materials.push(m);
-      return new THREE.Mesh(g, m);
-    };
 
     const block = (w: number, h: number, d: number, tex: THREE.Texture): THREE.Mesh => {
       const g = new THREE.BoxGeometry(w, h, d);
@@ -115,30 +109,71 @@ export class Demon {
       return new THREE.Mesh(g, m);
     };
 
-    // Gaunt, over-tall, long-armed. 2.4 units: it has to stoop in the tunnels.
-    this.torso = block(0.62, 1.0, 0.34, skin);
-    this.torso.position.set(0, 1.46, 0);
+    // 2.55 units of wrong proportions: a long forward-pitched spine, a skull
+    // that tapers to a snout, a jaw that hangs, ribs you can count, and arms
+    // long enough that the hands swing below the knees. Boxes alone read as a
+    // mannequin, so the skull and limbs taper and the knees bend backwards.
+
+    /** Angular tapered solid - a 5-sided cylinder, which is era-appropriate. */
+    const taper = (rTop: number, rBot: number, h: number, tex: THREE.Texture, pivotTop = false): THREE.Mesh => {
+      const g = new THREE.CylinderGeometry(rTop, rBot, h, 5, 1);
+      if (pivotTop) g.translate(0, -h / 2, 0);
+      g.setAttribute(
+        'color',
+        new THREE.Float32BufferAttribute(new Array(g.attributes.position.count * 3).fill(1), 3),
+      );
+      const m = psx.createMaterial({ map: tex, jitter: 1, affine: 1, emissive: 0.1 });
+      this.materials.push(m);
+      return new THREE.Mesh(g, m);
+    };
+
+    // Torso: narrow at the waist, flaring at the shoulders, pitched forward.
+    this.torso = taper(0.34, 0.2, 1.05, skin);
+    this.torso.scale.set(0.86, 1, 0.55);
+    this.torso.position.set(0, 1.5, 0);
     this.group.add(this.torso);
 
-    const pelvis = block(0.5, 0.26, 0.3, skin);
-    pelvis.position.set(0, 0.98, 0);
+    // Ribs, as slats across the chest.
+    for (let i = 0; i < 4; i++) {
+      const rib = block(0.46 - i * 0.05, 0.045, 0.3, skin);
+      rib.position.set(0, 1.78 - i * 0.16, 0.08);
+      this.torso.add(rib);
+      rib.position.set(0, (1.78 - i * 0.16 - 1.5) / 1, 0.13);
+    }
+
+    const pelvis = taper(0.2, 0.26, 0.3, skin);
+    pelvis.scale.set(1, 1, 0.7);
+    pelvis.position.set(0, 0.97, 0);
     this.group.add(pelvis);
 
+    // Head: tapered skull, thrust forward on a long neck, with a hanging jaw.
     this.head = new THREE.Group();
-    const skull = block(0.36, 0.38, 0.32, skin);
+    const neck = taper(0.08, 0.1, 0.26, skin);
+    neck.position.set(0, -0.16, -0.02);
+    this.head.add(neck);
+    const skull = taper(0.13, 0.3, 0.52, skin);
+    skull.rotation.x = Math.PI; // narrow end forward-down, like a snout
+    skull.scale.set(1, 1, 1.5);
+    skull.position.set(0, 0.04, 0.12);
     this.head.add(skull);
-    const faceGeo = new THREE.PlaneGeometry(0.34, 0.36);
+    this.jaw = block(0.21, 0.14, 0.32, skin);
+    this.jaw.geometry.translate(0, -0.07, 0.13);
+    this.jaw.position.set(0, -0.11, 0.1);
+    this.head.add(this.jaw);
+
+    const faceGeo = new THREE.PlaneGeometry(0.38, 0.38);
     faceGeo.setAttribute(
       'color',
       new THREE.Float32BufferAttribute(new Array(faceGeo.attributes.position.count * 3).fill(1), 3),
     );
-    const faceMat = psx.createMaterial({ map: face, jitter: 1, affine: 0.5, emissive: 0.1 });
+    const faceMat = psx.createMaterial({ map: face, jitter: 1, affine: 0.5, emissive: 0.12 });
     this.materials.push(faceMat);
     const faceMesh = new THREE.Mesh(faceGeo, faceMat);
-    faceMesh.position.set(0, 0, 0.17);
+    faceMesh.position.set(0, 0.04, 0.305);
     this.head.add(faceMesh);
-    // Two points of cold light, so it is identifiable in near darkness.
-    const eyeGeo = new THREE.PlaneGeometry(0.33, 0.1);
+
+    // Two points of cold light, deep set, so it is identifiable in the dark.
+    const eyeGeo = new THREE.PlaneGeometry(0.1, 0.07);
     eyeGeo.setAttribute(
       'color',
       new THREE.Float32BufferAttribute(new Array(eyeGeo.attributes.position.count * 3).fill(1), 3),
@@ -147,24 +182,47 @@ export class Demon {
       map: flatTexture('demoneye', PAL.white),
       jitter: 0.4,
       affine: 0,
-      emissive: 2.4,
+      emissive: 2.6,
     });
-    const eyes = new THREE.Mesh(eyeGeo, this.eyeMat);
-    eyes.position.set(0, 0.06, 0.185);
-    this.head.add(eyes);
-    this.head.position.set(0, 2.06, 0);
+    for (const dx of [-0.095, 0.095]) {
+      const eye = new THREE.Mesh(eyeGeo, this.eyeMat);
+      eye.position.set(dx, 0.1, 0.315);
+      this.head.add(eye);
+    }
+    // Low and forward: the head leads, ahead of the shoulders, not on top.
+    this.head.position.set(0, 2.06, 0.22);
     this.group.add(this.head);
 
     for (let i = 0; i < 2; i++) {
-      const leg = limb(0.2, 1.0, 0.22, skin);
-      leg.position.set(i === 0 ? -0.17 : 0.17, 0.98, 0);
-      this.legs.push(leg);
-      this.group.add(leg);
+      const side = i === 0 ? -1 : 1;
 
-      const arm = limb(0.15, 1.18, 0.16, skin);
-      arm.position.set(i === 0 ? -0.36 : 0.36, 1.9, 0);
-      this.arms.push(arm);
-      this.group.add(arm);
+      // Leg: thigh from the hip, shin hinged at the knee and angled back.
+      const thigh = taper(0.11, 0.085, 0.58, skin, true);
+      thigh.position.set(side * 0.15, 0.97, 0);
+      const shin = taper(0.075, 0.055, 0.56, skin, true);
+      shin.position.set(0, -0.58, 0);
+      thigh.add(shin);
+      const foot = block(0.12, 0.07, 0.3, skin);
+      foot.position.set(0, -0.56, 0.07);
+      shin.add(foot);
+      this.legs.push(thigh);
+      this.shins.push(shin);
+      this.group.add(thigh);
+
+      // Arm: upper arm from the shoulder, forearm hinged at the elbow, and a
+      // long splayed hand. Total reach puts the fingers below the knee.
+      const upper = taper(0.085, 0.065, 0.62, skin, true);
+      upper.position.set(side * 0.27, 1.96, 0);
+      const fore = taper(0.06, 0.045, 0.6, skin, true);
+      fore.position.set(0, -0.62, 0);
+      upper.add(fore);
+      const hand = block(0.07, 0.26, 0.05, skin);
+      hand.geometry.translate(0, -0.13, 0);
+      hand.position.set(0, -0.6, 0);
+      fore.add(hand);
+      this.arms.push(upper);
+      this.forearms.push(fore);
+      this.group.add(upper);
     }
 
     this.group.visible = false;
@@ -248,6 +306,12 @@ export class Demon {
     grid: Grid,
     player: { x: number; z: number; speed: number; sprinting: boolean },
     loud: boolean,
+    /**
+     * The player is inside a hide spot. It keeps hunting, but it cannot see,
+     * hear or reach them - so it runs down its memory, searches, and gives up.
+     * This is deliberately not suspension: the world keeps moving.
+     */
+    playerHidden = false,
   ): void {
     if (this.state === 'dormant') return;
 
@@ -275,7 +339,7 @@ export class Demon {
 
     // --- senses ---------------------------------------------------------
     let perceives = false;
-    if (dist < SIGHT_RANGE && grid.sightClear(this.x, this.z, player.x, player.z)) {
+    if (!playerHidden && dist < SIGHT_RANGE && grid.sightClear(this.x, this.z, player.x, player.z)) {
       const fx = Math.sin(this.yaw);
       const fz = Math.cos(this.yaw);
       const dot = (dx * fx + dz * fz) / (dist || 1);
@@ -284,7 +348,7 @@ export class Demon {
     }
     this.senses.sees = perceives;
 
-    const hearRadius = loud ? 220 : player.sprinting ? 30 : player.speed > 0.6 ? 15 : 0;
+    const hearRadius = playerHidden ? 0 : loud ? 220 : player.sprinting ? 30 : player.speed > 0.6 ? 15 : 0;
     const hears = hearRadius > 0 && dist < hearRadius;
 
     if (this.state === 'reveal') {
@@ -339,7 +403,7 @@ export class Demon {
           this.path = [];
           this.repathTimer = 0;
         }
-        if (dist < CATCH_DISTANCE && this.grace <= 0) {
+        if (dist < CATCH_DISTANCE && this.grace <= 0 && !playerHidden) {
           this.state = 'attack';
           this.attackTimer = ATTACK_WINDUP;
         }
@@ -351,7 +415,7 @@ export class Demon {
         this.yaw = approachAngle(this.yaw, Math.atan2(dx, dz), dt * 12);
         this.senses.agitation = 1;
         if (this.attackTimer <= 0) {
-          if (dist < CATCH_DISTANCE + 0.7 && this.grace <= 0) {
+          if (dist < CATCH_DISTANCE + 0.7 && this.grace <= 0 && !playerHidden) {
             this.onCatch?.();
           }
           this.state = 'chase';
@@ -509,56 +573,84 @@ export class Demon {
 
   private animatePose(speed: number, dt: number): void {
     const running = this.state === 'chase';
-    const swing = running ? 0.85 : 0.45;
+    const attacking = this.state === 'attack';
+
+    // Head twitches at irregular intervals. Nothing alive moves its head in a
+    // clean sine wave, and the twitch is most of what makes it read as wrong.
+    this.twitchTimer -= dt;
+    if (this.twitchTimer <= 0) {
+      this.twitchTimer = running ? 0.25 + Math.random() * 0.5 : 1.2 + Math.random() * 2.6;
+      this.twitch = (Math.random() - 0.5) * (running ? 0.5 : 0.28);
+    }
+    this.twitch *= 1 - Math.min(1, dt * 7);
+
+    const swing = running ? 0.95 : 0.42;
     const s = Math.sin(this.walkPhase);
+    // The second leg lags slightly, so the gait limps instead of marching.
+    const s2 = Math.sin(this.walkPhase + Math.PI * 0.86);
     const c = Math.cos(this.walkPhase);
 
     this.legs[0].rotation.x = s * swing;
-    this.legs[1].rotation.x = -s * swing;
+    this.legs[1].rotation.x = -s2 * swing;
+    // Knees bend backwards, and only ever one way.
+    this.shins[0].rotation.x = -Math.max(0, -s) * (running ? 1.5 : 0.75) - 0.12;
+    this.shins[1].rotation.x = -Math.max(0, s2) * (running ? 1.5 : 0.75) - 0.12;
 
-    if (this.state === 'attack') {
+    if (attacking) {
       const t = 1 - Math.max(0, this.attackTimer) / ATTACK_WINDUP;
-      this.arms[0].rotation.x = -1.5 - t * 0.6;
-      this.arms[1].rotation.x = -1.5 - t * 0.6;
-      this.arms[0].rotation.z = 0.3;
-      this.arms[1].rotation.z = -0.3;
-      this.torso.rotation.x = -0.25 - t * 0.2;
-      this.head.rotation.x = 0.2;
+      for (let i = 0; i < 2; i++) {
+        this.arms[i].rotation.x = -1.6 - t * 0.7;
+        this.arms[i].rotation.z = (i === 0 ? 1 : -1) * (0.4 - t * 0.3);
+        this.forearms[i].rotation.x = -0.5 + t * 0.45;
+      }
+      this.torso.rotation.x = -0.4 - t * 0.25;
+      this.head.rotation.x = 0.3 + t * 0.2;
+      this.jaw.rotation.x = 0.75 + t * 0.35;
     } else if (running) {
-      this.arms[0].rotation.x = -0.9 + -s * 0.5;
-      this.arms[1].rotation.x = -0.9 + s * 0.5;
-      this.arms[0].rotation.z = 0.12;
-      this.arms[1].rotation.z = -0.12;
-      this.torso.rotation.x = -0.3;
-      this.head.rotation.x = 0.22;
+      // Reaching, not jogging: arms forward and low, spine pitched over.
+      this.arms[0].rotation.x = -1.0 - s * 0.45;
+      this.arms[1].rotation.x = -1.0 + s2 * 0.45;
+      this.arms[0].rotation.z = 0.26;
+      this.arms[1].rotation.z = -0.26;
+      this.forearms[0].rotation.x = -0.55 - Math.max(0, s) * 0.3;
+      this.forearms[1].rotation.x = -0.55 - Math.max(0, -s2) * 0.3;
+      this.torso.rotation.x = -0.42;
+      this.head.rotation.x = 0.38;
+      this.jaw.rotation.x = 0.5 + Math.abs(s) * 0.22;
     } else if (this.state === 'reveal') {
-      // Standing perfectly still except for the head, which tracks. Lifted
-      // self-illumination for this state only, so the first sighting survives
-      // the fog between it and the player.
-      this.arms[0].rotation.x = 0.04;
-      this.arms[1].rotation.x = 0.04;
-      this.arms[0].rotation.z = 0;
-      this.arms[1].rotation.z = 0;
-      this.torso.rotation.x = 0;
-      this.head.rotation.x = Math.sin(this.walkPhase * 0.7) * 0.06;
+      // Dead still. Only the head moves, and only barely.
+      for (let i = 0; i < 2; i++) {
+        this.arms[i].rotation.x = 0.03;
+        this.arms[i].rotation.z = (i === 0 ? 1 : -1) * 0.07;
+        this.forearms[i].rotation.x = -0.18;
+      }
+      this.torso.rotation.x = -0.12;
+      this.head.rotation.x = Math.sin(this.walkPhase * 0.6) * 0.05;
+      this.jaw.rotation.x = 0.16;
     } else {
-      this.arms[0].rotation.x = -s * 0.3;
-      this.arms[1].rotation.x = s * 0.3;
-      this.arms[0].rotation.z = 0;
-      this.arms[1].rotation.z = 0;
-      this.torso.rotation.x = -0.06;
-      this.head.rotation.x = 0;
+      this.arms[0].rotation.x = -0.22 - s * 0.26;
+      this.arms[1].rotation.x = -0.22 + s2 * 0.26;
+      this.arms[0].rotation.z = 0.1;
+      this.arms[1].rotation.z = -0.1;
+      this.forearms[0].rotation.x = -0.4;
+      this.forearms[1].rotation.x = -0.4;
+      this.torso.rotation.x = -0.2;
+      this.head.rotation.x = 0.1;
+      this.jaw.rotation.x = 0.1;
     }
 
-    // Vertical bob from the stride, scaled by how fast it is actually going.
-    const amp = speed > 0.1 ? (running ? 0.07 : 0.04) : 0;
+    this.head.rotation.y = this.twitch;
+    this.head.rotation.z = this.twitch * 0.5;
+
+    // Vertical bob from the stride, and a lurch in the chase so its approach
+    // is uneven rather than a smooth dolly toward the camera.
+    const amp = speed > 0.1 ? (running ? 0.09 : 0.04) : 0;
     this.group.position.y = Math.abs(c) * amp;
+    this.eyeMat.uniforms.uEmissive.value = running || attacking ? 3.4 : 2.4;
     const glow = this.state === 'reveal' ? 0.5 : 0.1;
     for (const m of this.materials) {
       if (m !== this.eyeMat) m.uniforms.uEmissive.value = glow;
     }
-    this.eyeMat.uniforms.uEmissive.value = running ? 3.0 : 2.2;
-    void dt;
   }
 
   private animateDeath(): void {

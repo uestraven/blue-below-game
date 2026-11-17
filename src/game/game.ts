@@ -18,6 +18,7 @@ import { buildProps, type PropsBuild, type Readable } from '../world/props';
 import {
   PLAYER_START,
   REVEAL,
+  FALSE_WALL,
   FRONT_DOOR,
   TILE,
   cx,
@@ -97,6 +98,7 @@ export class Game {
   private gunGroup = new THREE.Group();
   private gunRecoil = 0;
   private knockTimer = 18;
+  private draughtTimer = 1;
   private revealClock = 0;
   private endingFade = 0;
   private deathFade = 0;
@@ -107,6 +109,10 @@ export class Game {
   private pendingResumeCapture = false;
   /** Disabled by the route tests while fast-forwarding scripted movement. */
   renderEnabled = true;
+  /** The hide spot the player is currently inside, if any. */
+  private currentHideSpot: import('../world/props').HideSpot | null = null;
+  /** Kinds of hiding place already used, so the flavour line shows once each. */
+  private readonly hideKindsSeen = new Set<string>();
 
   private readonly tmpColor = new THREE.Color();
   private readonly uiRoot: HTMLElement;
@@ -212,6 +218,9 @@ export class Game {
   private resetPlayerToStart(): void {
     this.player.teleport(cx(Math.floor(PLAYER_START.gx)), cz(Math.floor(PLAYER_START.gz)), PLAYER_START.yaw);
     this.player.controlLocked = false;
+    this.player.hidden = false;
+    this.currentHideSpot = null;
+    this.hud.setHidden(null);
   }
 
   private buildGunViewmodel(): void {
@@ -426,13 +435,31 @@ export class Game {
       },
     });
 
+    // ---- the footlocker the gun is in ------------------------------------
+    list.push({
+      id: 'footlocker',
+      pos: P.footlockerAnchor.pos,
+      normal: null,
+      radius: 2.6,
+      visible: () => !run().progress.footlockerOpen,
+      ready: () => true,
+      label: () => 'Force the footlocker',
+      activate: () => {
+        run().progress.footlockerOpen = true;
+        this.audio.play('clunk', P.footlockerAnchor.pos, 1.1);
+        this.audio.play('latch', P.footlockerAnchor.pos, 0.6);
+        this.hud.toast('The hasp gives. There is one weapon in it, and one round in that.', 4.5);
+        this.syncPropVisibility();
+      },
+    });
+
     // ---- the gun ---------------------------------------------------------
     list.push({
       id: 'gun',
       pos: P.gunAnchor.pos,
       normal: null,
       radius: 2.8,
-      visible: () => !run().progress.hasGun,
+      visible: () => run().progress.footlockerOpen && !run().progress.hasGun,
       ready: () => true,
       label: () => 'Take the gun',
       activate: () => {
@@ -442,6 +469,20 @@ export class Game {
         this.syncPropVisibility();
       },
     });
+
+    // ---- hiding places --------------------------------------------------
+    for (const spot of this.props.hideSpots) {
+      list.push({
+        id: spot.id,
+        pos: spot.pos,
+        normal: null,
+        radius: 2.6,
+        visible: () => !this.player.hidden,
+        ready: () => true,
+        label: () => spot.label,
+        activate: () => this.enterHide(spot.id),
+      });
+    }
 
     // ---- ordinary readables from the props pass -------------------------
     for (const r of this.props.readables) {
@@ -660,6 +701,40 @@ export class Game {
     this.hud.toast('It comes out of the cradle easily. Somewhere under the floor, something shifts.', 5.0);
   }
 
+  // ================================================================== hiding
+
+  /**
+   * Climb into a hide spot. Unlike a device panel this does NOT suspend the
+   * demon: the world keeps running and it keeps hunting. The player simply
+   * stops being perceivable, so it loses the trail, searches, and moves on.
+   */
+  enterHide(id: string): void {
+    if (this.phase !== 'play' || this.player.hidden) return;
+    const spot = this.props.hideSpots.find((h) => h.id === id);
+    if (!spot) return;
+    this.input.releaseAll();
+    this.currentHideSpot = spot;
+    this.player.enterHide(spot.cam, spot.yaw, spot.yawRange);
+    this.hud.setHidden(spot.kind);
+    this.audio.play('clunk', undefined, 0.35);
+    if (!this.hideKindsSeen.has(spot.kind)) {
+      this.hideKindsSeen.add(spot.kind);
+      this.hud.toast(spot.flavour, 4.0);
+    } else {
+      this.hud.toast('Hidden. It cannot see or hear you in here.', 2.4);
+    }
+  }
+
+  exitHide(): void {
+    if (!this.player.hidden) return;
+    const at = this.currentHideSpot?.exit;
+    this.player.exitHide(at ?? new THREE.Vector3(this.player.x, 0, this.player.z));
+    this.currentHideSpot = null;
+    this.hud.setHidden(null);
+    this.input.releaseAll();
+    this.audio.play('clunk', undefined, 0.3);
+  }
+
   // ================================================================= puzzles
 
   private openPuzzle(kind: PuzzleKind, anchor: THREE.Vector3): void {
@@ -744,6 +819,9 @@ export class Game {
     }
     this.player.controlLocked = false;
     this.player.releaseView();
+    this.player.hidden = false;
+    this.currentHideSpot = null;
+    this.hud.setHidden(null);
     this.syncPropVisibility();
     this.hud.setVisible(true);
     this.hud.clearToast();
@@ -779,7 +857,9 @@ export class Game {
   private syncPropVisibility(): void {
     const p = this.run.progress;
     this.props.diamondMesh.visible = !p.diamondTaken;
-    this.props.gunMesh.visible = !p.hasGun;
+    this.props.gunMesh.visible = p.footlockerOpen && !p.hasGun;
+    // Lid swings up and back when the locker is forced.
+    this.props.footlockerLid.rotation.x = p.footlockerOpen ? -1.9 : 0;
     this.props.keyMesh.visible = p.safeOpen && !p.hasKey;
     this.props.safeDoor.visible = !p.safeOpen;
     this.props.breakerDoor.visible = !p.hasKey;
@@ -845,7 +925,7 @@ export class Game {
     // The demon runs in `play` and in `reading` (reading is not a safe haven),
     // is suspended during puzzles, and is frozen entirely in menus/endings.
     if (this.phase === 'play' || this.phase === 'reading' || this.phase === 'puzzle') {
-      this.demon.update(d, this.grid, this.player, this.loudThisTick);
+      this.demon.update(d, this.grid, this.player, this.loudThisTick, this.player.hidden);
     }
 
     if (this.phase === 'play' || this.phase === 'reading') {
@@ -854,6 +934,7 @@ export class Game {
       this.checkSecretRoom();
       this.autoDiscoverClues();
       this.ambientKnocks(d);
+      this.draughtCue(d);
     }
 
     if (this.phase === 'reading') this.checkReadingInterrupt();
@@ -866,6 +947,14 @@ export class Game {
   }
 
   private handlePlayInput(dt: number): void {
+    // While hidden, E and Esc both mean "get out" rather than interact/pause.
+    if (this.player.hidden) {
+      if (this.input.consumePress('interact') || this.input.consumePress('cancel')) {
+        this.exitHide();
+      }
+      this.input.consumeClick();
+      return;
+    }
     if (this.input.consumePress('cancel')) {
       this.openPause();
       return;
@@ -1002,6 +1091,25 @@ export class Game {
     this.closeReadable();
   }
 
+  /**
+   * The false wall's only cue, other than the seam and the scratches: you can
+   * hear air moving through it. Replaces the sign that used to stand here and
+   * gave the secret away to anyone walking past.
+   */
+  private draughtCue(dt: number): void {
+    this.draughtTimer -= dt;
+    if (this.draughtTimer > 0) return;
+    const fx = cx(FALSE_WALL.gx);
+    const fz = cz(FALSE_WALL.gz);
+    const d = Math.hypot(this.player.x - fx, this.player.z - fz);
+    if (d > 10) {
+      this.draughtTimer = 0.5;
+      return;
+    }
+    this.draughtTimer = 3.4 + Math.random() * 2.6;
+    this.audio.play('draught', { x: fx, y: 1.4, z: fz }, 1 - d / 14);
+  }
+
   private ambientKnocks(dt: number): void {
     if (this.run.progress.revealPlayed) return;
     this.knockTimer -= dt;
@@ -1064,6 +1172,13 @@ export class Game {
     }
     const p = this.run.progress;
     this.hud.setAiming(p.hasGun && !p.roundSpent);
+    if (this.player.hidden) {
+      this.hud.setPrompt('Come out', 'E');
+      this.hud.setInventory(this.inventoryLines());
+      this.hud.setStamina(this.player.stamina, this.player.stamina < 0.999);
+      this.updateThreatCue();
+      return;
+    }
     if (this.pendingResumeCapture && !this.input.captured) {
       // The browser has not handed the mouse back yet; say so plainly rather
       // than leaving the player wondering why looking around does nothing.
@@ -1074,7 +1189,15 @@ export class Game {
       this.hud.setPrompt(null);
     }
 
-    const lines = [];
+    this.hud.setInventory(this.inventoryLines());
+    this.hud.setStamina(this.player.stamina, this.player.stamina < 0.999 || this.player.sprinting);
+
+    this.updateThreatCue();
+  }
+
+  private inventoryLines(): Array<{ cls: string; mark: string; text: string }> {
+    const p = this.run.progress;
+    const lines: Array<{ cls: string; mark: string; text: string }> = [];
     if (p.diamondTaken) lines.push({ cls: 'diamond', mark: '[*]', text: 'blue diamond' });
     if (p.hasKey) lines.push({ cls: 'key', mark: '[-]', text: 'breaker cabinet key' });
     if (p.hasGun) {
@@ -1085,31 +1208,32 @@ export class Game {
       );
     }
     if (p.cluesFound.length > 0) {
-      lines.push({ cls: 'clues', mark: '[' + p.cluesFound.length + ']', text: 'of 4 wall letters (TAB)' });
+      lines.push({ cls: 'clues', mark: `[${p.cluesFound.length}]`, text: 'of 4 wall letters (TAB)' });
     }
-    this.hud.setInventory(lines);
-    this.hud.setStamina(this.player.stamina, this.player.stamina < 0.999 || this.player.sprinting);
+    return lines;
+  }
 
-    // Directional threat cue.
+  /** Directional demon cue: a marker at the screen edge plus the threat text. */
+  private updateThreatCue(): void {
     if (!this.demon.alive || this.demon.state === 'dormant') {
       this.hud.setThreat(0, null);
-    } else {
-      const dx = this.demon.x - this.player.x;
-      const dz = this.demon.z - this.player.z;
-      const dist = Math.hypot(dx, dz);
-      const stateScale =
-        this.demon.state === 'chase' || this.demon.state === 'attack'
-          ? 1
-          : this.demon.state === 'investigate'
-            ? 0.72
-            : this.demon.state === 'reveal'
-              ? 0.9
-              : 0.5;
-      const level = Math.max(0, 1 - dist / 42) * stateScale * (this.demon.suspended ? 0.35 : 1);
-      const fwd = dx * Math.sin(this.player.yaw) + dz * Math.cos(this.player.yaw);
-      const rgt = dx * Math.cos(this.player.yaw) - dz * Math.sin(this.player.yaw);
-      this.hud.setThreat(level, Math.atan2(rgt, fwd));
+      return;
     }
+    const dx = this.demon.x - this.player.x;
+    const dz = this.demon.z - this.player.z;
+    const dist = Math.hypot(dx, dz);
+    const stateScale =
+      this.demon.state === 'chase' || this.demon.state === 'attack'
+        ? 1
+        : this.demon.state === 'investigate'
+          ? 0.72
+          : this.demon.state === 'reveal'
+            ? 0.9
+            : 0.5;
+    const level = Math.max(0, 1 - dist / 42) * stateScale * (this.demon.suspended ? 0.35 : 1);
+    const fwd = dx * Math.sin(this.player.yaw) + dz * Math.cos(this.player.yaw);
+    const rgt = dx * Math.cos(this.player.yaw) - dz * Math.sin(this.player.yaw);
+    this.hud.setThreat(level, Math.atan2(rgt, fwd));
   }
 
   // ------------------------------------------------------------------ audio
@@ -1260,7 +1384,13 @@ export class Game {
         ending: this.run.ending,
         deaths: this.run.deaths,
         elapsedSeconds: this.run.elapsed,
-        player: { x: this.player.x, z: this.player.z, yaw: this.player.yaw, region: this.grid.regionIdAt(this.player.x, this.player.z) },
+        player: {
+          x: this.player.x,
+          z: this.player.z,
+          yaw: this.player.yaw,
+          region: this.grid.regionIdAt(this.player.x, this.player.z),
+          hidden: this.player.hidden,
+        },
         demon: {
           state: this.demon.state,
           alive: this.demon.alive,
@@ -1345,6 +1475,10 @@ export class Game {
         this.step(1 / 60);
       },
       playReveal: () => this.playReveal(),
+      hideSpots: () =>
+        this.props.hideSpots.map((h) => ({ id: h.id, kind: h.kind, x: h.pos.x, z: h.pos.z, label: h.label })),
+      enterHide: (id: string) => this.enterHide(id),
+      exitHide: () => this.exitHide(),
       clueDecals: () =>
         this.props.clueDecals.map((c) => ({ numeral: c.numeral, letter: c.letter, where: c.where })),
       /** Park the demon on the player and run until it lands a hit. */

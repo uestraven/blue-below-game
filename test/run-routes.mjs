@@ -109,6 +109,7 @@ async function main() {
     ['10', 'Release audit: no placeholders, no untextured geometry', route10],
     ['11', 'Audio graph: every sound constructs and schedules', route11],
     ['12', 'Real keyboard input drives the game, not just the debug table', route12],
+    ['13', 'Hiding: invisible to the demon, and not a suspension', route13],
   ];
 
   for (const [num, title, fn] of routes) {
@@ -413,14 +414,21 @@ async function route3(api, page) {
   await startRun(api, 3003);
 
   // The secret room is entered by walking through the wall.
-  const gun = await findInteractable(api, 'gun');
-  const stand = await api.call('approachPoint', gun.x, gun.z);
+  // The gun is inside the footlocker now, so the locker is what we walk to.
+  const locker = await findInteractable(api, 'footlocker');
+  const stand = await api.call('approachPoint', locker.x, locker.z);
   const arrived = await api.call('walkTo', stand.x, stand.z, 16000, 4.3);
   check('walked through the false wall into the sealed store', arrived);
-  eq('standing in the secret region', await api.call('regionAt', gun.x, gun.z), 'secret');
+  eq('standing in the secret region', await api.call('regionAt', locker.x, locker.z), 'secret');
   check('false wall discovery recorded', (await api.snap()).progress.secretFound);
   await api.shot(page, 'route3-secret-room');
-  await api.call('face', gun.x, gun.z);
+  await api.call('face', locker.x, locker.z);
+  // The gun is not lying in the open any more: the footlocker has to be forced
+  // before it is even visible.
+  check('the gun is not offered before the footlocker is opened', !(await api.call('interactables')).some((i) => i.id === 'gun'));
+  await api.call('use', 'footlocker');
+  check('footlocker forced', (await api.snap()).progress.footlockerOpen);
+  check('only now is the gun there to take', (await api.call('interactables')).some((i) => i.id === 'gun'));
   await api.call('use', 'gun');
   const s0 = await api.snap();
   check('gun taken with one round', s0.progress.hasGun && !s0.progress.roundSpent);
@@ -469,10 +477,11 @@ async function route3(api, page) {
 async function route4(api, page) {
   await startRun(api, 4004);
 
-  const gun = await findInteractable(api, 'gun');
-  const gunStand = await api.call('approachPoint', gun.x, gun.z);
+  const locker4 = await findInteractable(api, 'footlocker');
+  const gunStand = await api.call('approachPoint', locker4.x, locker4.z);
   check('walked through the false wall to the gun', await api.call('walkTo', gunStand.x, gunStand.z, 16000, 4.3));
-  await api.call('face', gun.x, gun.z);
+  await api.call('face', locker4.x, locker4.z);
+  await api.call('use', 'footlocker');
   await api.call('use', 'gun');
 
   await goToDiamond(api);
@@ -912,8 +921,8 @@ async function route9(api) {
     ['tunnels -> clue I (pump chamber)', cell(13, 11), at('clue:I')],
     ['clue I -> clue II (collapsed shelving)', at('clue:I'), at('clue:II')],
     ['clue II -> the false wall', at('clue:II'), cell(17, 6)],
-    ['false wall -> the gun', cell(17, 6), at('gun')],
-    ['gun -> the vault', at('gun'), at('diamond')],
+    ['false wall -> the footlocker', cell(17, 6), at('footlocker')],
+    ['footlocker -> the vault', at('footlocker'), at('diamond')],
     ['vault -> reveal corridor', at('diamond'), cell(15, 3)],
     ['reveal -> counter safe', cell(15, 3), at('safe')],
     ['safe -> breaker cabinet', at('safe'), at('breaker')],
@@ -1041,6 +1050,12 @@ async function route12(api, page) {
   const walk = await peakSpeed();
   check('holding W walks at the design speed', Math.abs(walk - 4.3) < 0.6, `${walk.toFixed(2)} u/s, expected ~4.3`);
 
+  // Back to the start of the runway: the settle-based poll above covers enough
+  // ground to reach the far side of the hall, and a player pressed against a
+  // workbench measures 0 u/s no matter what they are holding.
+  await api.call('teleportCell', 30, 26);
+  await api.call('face', 57, (26.5 - 26) * 3);
+  await wait(150);
   await page.keyboard.down('ShiftLeft');
   const sprint = await peakSpeed();
   check('Shift sprints faster than walking', sprint > walk + 1.2, `${sprint.toFixed(2)} vs ${walk.toFixed(2)} u/s`);
@@ -1067,6 +1082,31 @@ async function route12(api, page) {
   const dAlong = Math.abs(afterStrafe.x - beforeStrafe.x);
   const dSide = Math.abs(afterStrafe.z - beforeStrafe.z);
   check('A strafes sideways, not forward', dSide > dAlong, `sideways ${dSide.toFixed(2)} vs forward ${dAlong.toFixed(2)}`);
+  // Direction, not just sideways-ness. Right is cross(forward, up); with
+  // forward = (sin yaw, cos yaw) that is (-cos yaw, 0, sin yaw), so facing +x
+  // (yaw = pi/2) the player's right is +z and their left is -z. A test that
+  // only checks "sideways" passes with A and D swapped, which is exactly how
+  // that shipped once and had to be caught by a human.
+  check(
+    'A strafes LEFT, not right',
+    afterStrafe.z - beforeStrafe.z < -0.5,
+    `dz ${(afterStrafe.z - beforeStrafe.z).toFixed(2)} (expected negative: left of +x is -z)`,
+  );
+
+  await api.call('teleportCell', 30, 26);
+  await api.call('face', 57, (26.5 - 26) * 3);
+  await wait(150);
+  const beforeD = (await api.snap()).player;
+  await page.keyboard.down('KeyD');
+  await peakSpeed();
+  await page.keyboard.up('KeyD');
+  await wait(300);
+  const afterD = (await api.snap()).player;
+  check(
+    'D strafes RIGHT',
+    afterD.z - beforeD.z > 0.5,
+    `dz ${(afterD.z - beforeD.z).toFixed(2)} (expected positive)`,
+  );
 
   // --- interaction, readables and pause, all through real keys ----------
   await api.call('setRenderEnabled', false);
@@ -1139,6 +1179,78 @@ async function route12(api, page) {
   eq('no key left stuck after the panel session', (await api.call('heldActions')).length, 0);
 
   await api.call('setRenderEnabled', false);
+}
+
+// =====================================================================
+// ROUTE 13 - hiding places
+// =====================================================================
+async function route13(api, page) {
+  await startRun(api, 13013);
+
+  const spots = (await api.call('hideSpots')).map((h) => h.id);
+  check('there are hiding places spread through the facility', spots.length >= 5, spots.join(' '));
+
+  // Take the stone and get the demon on the board for real.
+  await goToDiamond(api);
+  await api.call('use', 'diamond');
+  await api.call('pick', 'LOOK AT THE STONE');
+  await api.call('pick', 'TAKE THE DIAMOND');
+  await walkUntilReveal(api);
+
+  // Break away from the reveal rather than back past it: the sump at the east
+  // end of the tunnels is away from where the demon is standing, which is what
+  // a player who has just been shown the thing would actually do.
+  await walkToAndUse(api, 'hide-sump-crate', { speed: 6.6, use: false });
+  let s = await api.snap();
+  check('reached the hiding place alive', s.phase === 'play' && s.deaths === 0, `phase=${s.phase} deaths=${s.deaths}`);
+
+  // Get in before it arrives, which is the realistic way this plays.
+  await api.call('use', 'hide-sump-crate');
+  s = await api.snap();
+  check('player is hidden', s.player.hidden);
+  eq('hiding does NOT suspend the demon - the world keeps running', s.demon.suspended, false);
+  eq('still in normal play, not a menu or a puzzle mode', s.phase, 'play');
+  await api.shot(page, 'route13-hidden');
+
+  // Sit there while it hunts. It must never land a hit, however close it gets.
+  let minDist = 999;
+  let sawClose = false;
+  let everSuspended = false;
+  for (let i = 0; i < 60; i++) {
+    await api.step(1 / 60, 30);
+    s = await api.snap();
+    if (s.demon.suspended) everSuspended = true;
+    minDist = Math.min(minDist, s.demon.distance);
+    // It homes on where it last *perceived* the player, not where they are, so
+    // "came looking" is the right bar here, not "stood on the crate".
+    if (s.demon.distance < 14) sawClose = true;
+    if (s.phase !== 'play') break;
+  }
+  s = await api.snap();
+  check('the demon came looking while we were hidden', sawClose, `closest ${minDist.toFixed(2)} units`);
+  check('it never caught the player', s.phase === 'play' && s.deaths === 0, `phase=${s.phase} deaths=${s.deaths}`);
+  check('it was never suspended at any point', !everSuspended);
+  check(
+    'it lost the trail and gave up hunting',
+    s.demon.state === 'patrol' || s.demon.state === 'search' || s.demon.state === 'investigate',
+    s.demon.state,
+  );
+  check('the player is still hidden and alive', s.player.hidden);
+
+  // Climb out and confirm control comes back on the floor.
+  await api.call('exitHide');
+  await api.step(1 / 60, 10);
+  s = await api.snap();
+  eq('no longer hidden', s.player.hidden, false);
+  eq('back in play', s.phase, 'play');
+  check('put back on a walkable floor cell', s.player.region === 'maze', s.player.region);
+  check('can move again after hiding', await api.call('walkTo', (24.5 - 32) * 3, (9.5 - 26) * 3, 4000, 4.3));
+
+  // And once out, it can perceive the player again.
+  await api.call('forceDemonTo', 24, 9);
+  await api.step(1 / 60, 120);
+  s = await api.snap();
+  check('the demon can detect the player again once out of cover', s.demon.state !== 'patrol', s.demon.state);
 }
 
 main().catch((e) => {

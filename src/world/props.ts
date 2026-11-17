@@ -49,20 +49,45 @@ export interface ClueDecal {
   where: string;
 }
 
+/**
+ * Somewhere the player can get inside and be invisible to the demon. Hiding
+ * does not suspend it - it keeps hunting, loses track of you, searches and
+ * eventually wanders off, which is the whole point of the mechanic.
+ */
+export interface HideSpot {
+  id: string;
+  kind: 'locker' | 'under' | 'crate';
+  /** Where the eye sits while hidden. */
+  cam: THREE.Vector3;
+  /** Yaw held while hidden, and how far the player may look either side. */
+  yaw: number;
+  yawRange: number;
+  /** Where the player is put back on the floor when they climb out. */
+  exit: THREE.Vector3;
+  /** Interaction anchor. */
+  pos: THREE.Vector3;
+  label: string;
+  /** Short line shown the first time this kind of spot is used. */
+  flavour: string;
+}
+
 export interface PropsBuild {
   root: THREE.Group;
   blockers: Aabb[];
   readables: Readable[];
   clueDecals: ClueDecal[];
+  hideSpots: HideSpot[];
   /** Device interaction anchors. */
   safeAnchor: { pos: THREE.Vector3; normal: THREE.Vector3 };
   breakerAnchor: { pos: THREE.Vector3; normal: THREE.Vector3 };
   lockAnchor: { pos: THREE.Vector3; normal: THREE.Vector3 };
   diamondAnchor: { pos: THREE.Vector3; normal: THREE.Vector3 };
-  gunAnchor: { pos: THREE.Vector3; normal: THREE.Vector3 };
+  gunAnchor: { pos: THREE.Vector3; normal: THREE.Vector3 | null };
   /** Mutable visuals the game toggles. */
   diamondMesh: THREE.Group;
   gunMesh: THREE.Group;
+  footlockerLid: THREE.Mesh;
+  footlockerAnchor: { pos: THREE.Vector3 };
   safeDoor: THREE.Mesh;
   breakerDoor: THREE.Mesh;
   doorLeaves: THREE.Group;
@@ -80,6 +105,7 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
   const blockers: Aabb[] = [];
   const readables: Readable[] = [];
   const clueDecals: ClueDecal[] = [];
+  const hideSpots: HideSpot[] = [];
   const glows: PropsBuild['glows'] = [];
 
   const tmp = new THREE.Color();
@@ -200,6 +226,33 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
     return { mesh, pos: a.pos.clone(), normal: a.normal.clone(), mat };
   };
 
+  /**
+   * Register a hide spot and mark its interior dark, so from outside it reads
+   * as something with a space inside rather than a solid block.
+   */
+  const addHideSpot = (
+    id: string,
+    kind: HideSpot['kind'],
+    cam: [number, number, number],
+    yaw: number,
+    exit: [number, number],
+    label: string,
+    flavour: string,
+    yawRange = 1.15,
+  ): void => {
+    hideSpots.push({
+      id,
+      kind,
+      cam: new THREE.Vector3(cam[0], cam[1], cam[2]),
+      yaw,
+      yawRange,
+      exit: new THREE.Vector3(exit[0], 0, exit[1]),
+      pos: new THREE.Vector3(cam[0], Math.max(cam[1], 1.0), cam[2]),
+      label,
+      flavour,
+    });
+  };
+
   const T = {
     metal: SURFACE.metalDark(),
     machine: SURFACE.machine(),
@@ -226,6 +279,15 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
   // =====================================================================
   // Reception counter, placed so it does not obstruct the route.
   addBox(cx(32), 0.55, cz(39), 7, 1.1, 1.2, { tex: T.desk, collide: true, uvScale: 2 });
+  addHideSpot(
+    'hide-reception',
+    'under',
+    [cx(32), 0.62, cz(39)],
+    Math.PI, // looking back out into the lobby, toward the front door
+    [cx(32), cz(40)],
+    'Get under the counter',
+    'You fold up under the counter where the receptionist used to put her feet.',
+  );
   addBox(cx(32), 1.15, cz(39), 7, 0.1, 1.4, { tex: T.metal, uvScale: 2 });
   // Two waiting benches.
   addBox(cx(45), 0.45, cz(40), 1.0, 0.9, 4.0, { tex: T.desk, collide: true, uvScale: 1.5 });
@@ -387,6 +449,15 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
     addBox(cx(19), 0.85, cz(40 + i), 1.1, 1.7, 0.9, { tex: T.locker, collide: true, uvScale: 1 });
   }
   addBox(cx(25), 0.55, cz(43), 3.0, 1.1, 1.6, { tex: T.desk, collide: true, uvScale: 1.6 });
+  addHideSpot(
+    'hide-records',
+    'under',
+    [cx(25), 0.62, cz(43)],
+    0,
+    [cx(25), cz(42)],
+    'Get under the desk',
+    'There is just room under the desk if you keep your knees up.',
+  );
   addBox(cx(27), 0.9, cz(40), 1.2, 1.8, 1.0, { tex: T.locker, collide: true, uvScale: 1 });
   const memo = addPlate(
     23,
@@ -424,6 +495,11 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
       'Underneath, in a different hand, scratched hard into the paper:',
       '',
       '  "it is written down. she wrote it on the walls."',
+      '',
+      'And lower still, almost off the page:',
+      '',
+      '  "containment left one on site. sealed store off the tunnels -',
+      '   you will not find the door, you have to feel the air move."',
     ],
     pos: memo.pos,
     normal: memo.normal,
@@ -479,6 +555,15 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
   }
   // Control desk against the island's south face, facing the room.
   addBox(cx(39) + 1.5, 0.55, lz(26) + 1.4, 5.0, 1.1, 1.2, { tex: T.desk, collide: true, uvScale: 2 });
+  addHideSpot(
+    'hide-control-desk',
+    'under',
+    [cx(39) + 1.5, 0.62, lz(26) + 1.4],
+    0,
+    [cx(39) + 1.5, lz(26) + 3.5],
+    'Get under the control desk',
+    'Under the desk, with the plant humming through the floor against your back.',
+  );
   addPlate(
     39,
     26,
@@ -575,6 +660,16 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
   for (const [gx, gz] of [[10, 28], [19, 17]] as const) {
     addBox(cx(gx), 1.0, cz(gz), 1.0, 2.0, 1.2, { tex: T.locker, collide: true, uvScale: 1 });
   }
+  addHideSpot(
+    'hide-workshop-locker',
+    'locker',
+    [cx(10), 1.3, cz(28)],
+    Math.PI, // the door faces back into the workshop
+    [cx(10), cz(27)],
+    'Get into the locker',
+    'You pull the locker door to. It does not quite shut.',
+    0.75,
+  );
   addBox(cx(16), 0.5, cz(28), 1.2, 1.0, 1.2, { tex: T.crate, collide: true, uvScale: 1 });
 
   // Housing recessed into the wall; the labelled panel is the door itself, so
@@ -652,6 +747,16 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
   for (let i = 0; i < 3; i++) {
     addBox(lx(12) + 0.5, 1.0, cz(10) + i * 1.0 - 1.0, 0.9, 2.0, 0.95, { tex: T.locker, collide: true, uvScale: 1 });
   }
+  addHideSpot(
+    'hide-tunnel-locker',
+    'locker',
+    [lx(12) + 0.85, 1.3, cz(10)],
+    Math.PI / 2, // the door faces east, out across the entry hall
+    [cx(13), cz(10)],
+    'Get into the locker',
+    'Standing in a dead man\u2019s locker, breathing through your mouth.',
+    0.75,
+  );
   addPlate(
     13,
     12,
@@ -677,6 +782,16 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
   // Landmark 4: the sump - a dead end with a floor drain, to punish a wrong turn.
   addCylinder(cx(25), 0.04, cz(11), 0.8, 0.08, 10, T.metal);
   addBox(cx(24), 0.55, cz(12), 1.2, 1.1, 1.0, { tex: T.crate, collide: true, uvScale: 1 });
+  addHideSpot(
+    'hide-sump-crate',
+    'crate',
+    [cx(24), 0.6, cz(12)],
+    -Math.PI / 2,
+    [cx(24), cz(11)],
+    'Get into the crate',
+    'You climb into the crate and pull the lid most of the way over.',
+    0.6,
+  );
   addPlate(
     25,
     12,
@@ -721,16 +836,10 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
     alphaTest: 0.5,
     inset: 0.05,
   });
-  addPlate(
-    FALSE_WALL.gx - 1,
-    FALSE_WALL.gz,
-    '+x',
-    2.2,
-    1.1,
-    0.44,
-    signTexture('seam-note', ['DRAUGHT'], { bg: PAL.rust, fg: PAL.bone, width: 256, height: 128, size: 34 }),
-    { inset: 0.05 },
-  );
+  // Deliberately no sign here. The tells are the seam in the wall texture, the
+  // scratch marks beside it, and the draught you can hear - which is what "a
+  // subtle environmental clue" means. A placard reading DRAUGHT hands over the
+  // secret room, and with it the good ending, to anyone who walks past.
 
   // =====================================================================
   // SECRET STORE - behind the false wall. The gun, and why it is here.
@@ -740,9 +849,34 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
   // A sheet over something that is the right size for a person.
   addBox(cx(21), 0.22, cz(7), 2.2, 0.44, 0.9, { tex: T.bone, rotY: 0.12, collide: true, uvScale: 1 });
 
+  // Steel footlocker. The gun is inside it and invisible until it is forced,
+  // so finding the room is no longer the same as finding the weapon.
+  addBox(cx(21), 0.3, cz(6) + 0.6, 1.5, 0.6, 0.8, { tex: T.metal, uvScale: 1, collide: true });
+  const lidGeo = new THREE.BoxGeometry(1.55, 0.12, 0.85);
+  lidGeo.translate(0, 0, -0.42); // hinge along the back edge
+  bakeGeometry(lidGeo, new THREE.Vector3(cx(21), 0.62, cz(6) + 0.6));
+  const footlockerLid = new THREE.Mesh(lidGeo, psx.createMaterial({ map: T.metal, jitter: 0.8, affine: 0.4 }));
+  footlockerLid.position.set(cx(21), 0.62, cz(6) + 1.02);
+  root.add(footlockerLid);
+  addPlate(
+    21,
+    5,
+    '-z',
+    1.5,
+    1.5,
+    0.75,
+    signTexture('containment-tag', ['CONTAINMENT', 'ISSUE 1 OF 1'], {
+      bg: PAL.rust,
+      fg: PAL.bone,
+      width: 256,
+      height: 128,
+      size: 22,
+    }),
+  );
+
   const gunMesh = new THREE.Group();
   {
-    const gpos = new THREE.Vector3(cx(20), 1.08, cz(6));
+    const gpos = new THREE.Vector3(cx(21), 0.42, cz(6) + 0.6);
     const mkPart = (
       w: number,
       h: number,
@@ -763,29 +897,8 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
     gunMesh.add(mkPart(0.08, 0.26, 0.11, 0, -0.16, -0.24, T.gunGrip)); // grip
     gunMesh.add(mkPart(0.05, 0.08, 0.06, 0, -0.07, -0.12, T.gunMetal)); // trigger guard
     gunMesh.position.copy(gpos);
-    gunMesh.rotation.y = 0.5;
-    gunMesh.scale.setScalar(1.35);
-    // A small glint so the one weapon in the building is actually spotted.
-    const glintGeo = new THREE.PlaneGeometry(0.75, 0.75);
-    glintGeo.setAttribute(
-      'color',
-      new THREE.Float32BufferAttribute(new Array(glintGeo.attributes.position.count * 3).fill(1), 3),
-    );
-    const glintMat = psx.createMaterial({
-      map: glowTexture(PAL.bone),
-      jitter: 0,
-      affine: 0,
-      emissive: 0.8,
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    glintMat.uniforms.uOpacity.value = 0.5;
-    const glint = new THREE.Mesh(glintGeo, glintMat);
-    glint.position.set(0, 0.02, 0);
-    gunMesh.add(glint);
-    (gunMesh as THREE.Group & { userData: { glint: THREE.Mesh } }).userData.glint = glint;
-    glows.push({ mat: glintMat, base: 0.8, rate: 0.5 });
+    gunMesh.rotation.y = 0.35;
+    gunMesh.scale.setScalar(1.15);
     root.add(gunMesh);
   }
 
@@ -960,13 +1073,16 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
     blockers,
     readables,
     clueDecals,
+    hideSpots,
     safeAnchor: { pos: safeFace.pos, normal: safeFace.normal },
     breakerAnchor: { pos: breakerFace.pos, normal: breakerFace.normal },
     lockAnchor: { pos: lockPlate.pos, normal: lockPlate.normal },
     diamondAnchor: { pos: new THREE.Vector3(pedX, DAIS.height + 1.2, pedZ), normal: new THREE.Vector3(0, 0, 1) },
-    gunAnchor: { pos: new THREE.Vector3(cx(20), 1.1, cz(6)), normal: new THREE.Vector3(0, 0, 1) },
+    gunAnchor: { pos: new THREE.Vector3(cx(21), 0.6, cz(6) + 0.6), normal: null },
     diamondMesh,
     gunMesh,
+    footlockerLid,
+    footlockerAnchor: { pos: new THREE.Vector3(cx(21), 0.8, cz(6) + 0.6) },
     safeDoor,
     breakerDoor,
     doorLeaves,

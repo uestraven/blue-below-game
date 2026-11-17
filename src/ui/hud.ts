@@ -21,6 +21,7 @@ export class Hud {
   private readonly dir: HTMLDivElement;
   private readonly toastEl: HTMLDivElement;
   private readonly tag: HTMLDivElement;
+  private readonly hideOverlay: HTMLDivElement;
   private toastTimer: number | null = null;
 
   constructor(parent: HTMLElement) {
@@ -43,8 +44,12 @@ export class Hud {
     this.dir.appendChild(document.createElement('i'));
     this.toastEl = div('hud-toast');
     this.tag = div('hud-vhs');
+    // Framing for the inside of a hiding place: slats for a locker, a low
+    // letterbox for under a desk, a lid gap for a crate.
+    this.hideOverlay = div('hud-hide');
+    this.hideOverlay.innerHTML = '<i class="slats"></i><span class="tagline">HIDDEN</span>';
 
-    for (const el of [this.crosshair, this.prompt, this.bottom, this.stamina, this.threat, this.dir, this.toastEl, this.tag]) {
+    for (const el of [this.hideOverlay, this.crosshair, this.prompt, this.bottom, this.stamina, this.threat, this.dir, this.toastEl, this.tag]) {
       this.root.appendChild(el);
     }
   }
@@ -56,6 +61,19 @@ export class Hud {
   setTag(text: string): void {
     this.tag.textContent = text;
   }
+
+  /** `kind` frames the view from inside a hiding place; null clears it. */
+  setHidden(kind: 'locker' | 'under' | 'crate' | null): void {
+    this.hiddenKind = kind;
+    this.hideOverlay.className = kind ? `hud-hide on ${kind}` : 'hud-hide';
+    this.crosshair.style.display = kind ? 'none' : '';
+  }
+
+  get hidden(): boolean {
+    return this.hiddenKind !== null;
+  }
+
+  private hiddenKind: 'locker' | 'under' | 'crate' | null = null;
 
   setAiming(aiming: boolean): void {
     this.crosshair.className = aiming ? 'hud-crosshair aiming' : 'hud-crosshair';

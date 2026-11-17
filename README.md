@@ -111,6 +111,11 @@ Both are reproducible: every procedural asset is seeded from its own name.
 | **Esc** | Close an interaction, or pause while exploring |
 | **Tab** | Clue journal (also reachable from the pause screen) |
 
+Pressing **E** at a locker, a crate, or the gap under a desk or counter climbs
+inside it. While you are in there the demon cannot see or hear you at all, and
+cannot reach you. You can look around a limited arc to watch it go past, and
+**E** or **Esc** climbs back out. Six of them are spread through the facility.
+
 Inside a device panel: mouse or **A**/**D** moves the selection, left click or
 **E**/**Enter** actuates, **W**/**S** turns a letter wheel on the door lock,
 **R** resets, **Esc** steps back. Device panels keep the mouse captured, so
@@ -151,9 +156,17 @@ because each one unlocks the next:
    painted on four walls in blood, marked `I` to `IV`. The numeral is the
    letter's position. They can be found in any order and revisited any time.
 
-Behind a false wall in the maze is a gun with **one** round. A confirmed hit
-kills the demon permanently for that run; a miss spends the round and you can
-still escape. Killing it does not excuse you from any of the three puzzles.
+Behind a false wall in the maze is a sealed store, and in a footlocker in that
+store is a gun with **one** round. Nothing signposts the false wall: there is a
+seam in the masonry, scratch marks beside it, and a draught you can hear. A
+confirmed hit kills the demon permanently for that run; a miss spends the round
+and you can still escape. Killing it does not excuse you from any of the three
+puzzles.
+
+**Hiding is not the same as a device panel.** A panel suspends the demon
+entirely. Hiding does not: the world keeps running and it keeps hunting, so it
+comes to where it last saw you, searches, and eventually wanders off. You just
+stop being something it can find.
 
 - **Bad Ending** — cross the threshold with the stone while it is alive.
 - **Good Ending** — cross the threshold with the stone after killing it.

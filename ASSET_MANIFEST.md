@@ -79,6 +79,13 @@ cache key, which is also the three.js `Texture.name` in the running build.
 | `surf.prop.pipe` | 32² | Pipes, conduit, stacks (shaded cylinder strip) | AUTHORED-BY-ENGINE |
 | `surf.prop.gunmetal`, `surf.prop.gungrip` | 32² | The gun, world and first-person | AUTHORED-BY-ENGINE |
 
+Demon textures, both 64², both AUTHORED-BY-ENGINE:
+
+| Name | Notes |
+|---|---|
+| `surf.demon.skin` | Dark mass with drum-tight bone showing through in patches and lengthwise sinew. A uniformly pale skin reads as a statue and a uniformly black one reads as a hole in the screen; this reads as a body |
+| `surf.demon.face` | Built from absence: two oversized sunken sockets under a pale brow ridge, and a vertical split mouth with irregular teeth. Legible as wrong at eight pixels tall |
+
 ### 3.3 Blood-letter decals — composed per run
 
 | Name | Size | Notes | Approval |
@@ -128,7 +135,7 @@ jitter and affine warp off.
 
 | Asset | Build | Pivot / scale | Approval |
 |---|---|---|---|
-| **Demon** (`src/game/demon.ts`) | 10 boxes + 2 quads: pelvis, torso, skull, face quad, eye quad, 2 legs, 2 arms. 2.4 units tall. `surf.demon.skin`, `surf.demon.face` | Group origin at the feet, local +Z = facing. Limbs pivot at the joint | AUTHORED-BY-ENGINE |
+| **Demon** (`src/game/demon.ts`) | 2.55 units. Tapered 5-sided solids rather than plain boxes: forward-pitched torso with four rib slats, long neck, tapered skull with a hinged jaw, segmented legs (thigh + shin + foot) with backward-bending knees, segmented arms (upper + forearm + long hand) reaching below the knee, face quad and two emissive eye quads. `surf.demon.skin`, `surf.demon.face` | Group origin at the feet, local +Z = facing. Every limb segment pivots at its joint; forearms and shins are children of the upper segments | AUTHORED-BY-ENGINE |
 | **Diamond** | Scaled octahedron + billboarded `glow` quad, emissive 1.5, slow Y rotation | Centre of the stone | AUTHORED-BY-ENGINE |
 | **Gun (world)** | 4 boxes + billboarded glint quad | Centre of the cylinder | AUTHORED-BY-ENGINE |
 | **Gun (first person)** | 4 boxes + muzzle-flash quad, rendered in a separate overlay pass with depth cleared so it never clips walls | Grip, offset (0.11, −0.085, −0.26) from the eye | AUTHORED-BY-ENGINE |
@@ -140,10 +147,11 @@ no clips, no skinning):
 | Name | Trigger | Description |
 |---|---|---|
 | `idle` | `patrol` at rest | Minimal arm sway, slight forward lean |
-| `walk` | `patrol`, `investigate`, `search` | ±0.45 rad leg swing, counter-swinging arms |
-| `run` | `chase` | ±0.85 rad leg swing, 0.3 rad forward lean, arms raised and reaching, eyes brighten |
+| `walk` | `patrol`, `investigate`, `search` | ±0.42 rad leg swing, knees bending backwards, counter-swinging arms. The two legs are 0.86π out of phase rather than exactly opposed, so the gait limps |
+| `run` | `chase` | ±0.95 rad leg swing, 0.42 rad forward pitch, arms low and reaching rather than pumping, jaw part open, eyes brighten, uneven vertical lurch |
+| `twitch` | all states, overlaid | Head snaps to a random offset at irregular intervals (0.25-0.75 s while chasing, 1.2-3.8 s otherwise) and decays. Overlays whatever else is playing |
 | `stand` | `reveal` | Dead still except head tracking; body self-illumination lifted to 0.5 so the first sighting survives the fog |
-| `attack` | `attack` | Both arms thrown forward, torso pitched, 0.42 s windup |
+| `attack` | `attack` | Both arms thrown forward and splayed, forearms opening, torso pitched hard over, jaw wide, 0.42 s windup |
 | `death` | `dead` | Falls forward over 1.5 s, then fades over 0.9 s, hidden at 2.4 s |
 
 ### 3.8 Ending stills — 3 assets
@@ -170,6 +178,7 @@ with HRTF; the listener tracks the camera.
 | `demon.growl` | Loop, positional | Noise at 0.55× rate + 47 Hz saw → resonant lowpass swept by agitation | AUTHORED-BY-ENGINE |
 | `player.heartbeat` | Loop | Two sine thumps per beat, 62–134 BPM by proximity and chase state | AUTHORED-BY-ENGINE |
 | `step_concrete` / `step_metal` / `step_tile` | One-shot | Filtered noise bursts, per-region surface, louder when sprinting | AUTHORED-BY-ENGINE |
+| `draught` | One-shot, positional | Air pulling through a gap in masonry, played near the false wall every 3-6 s. The only audible cue that the wall is not a wall — it replaced a sign that gave the secret away | AUTHORED-BY-ENGINE |
 | `knock` | One-shot, positional | Low sine thump + noise, doubled. Placed **inside a wall near the player** — the note's "something knocked from inside the walls". Every 20–42 s before the diamond, 6–14 s after it | AUTHORED-BY-ENGINE |
 | `relay`, `clunk`, `latch` | One-shot | Switch and solenoid transients for the three devices | AUTHORED-BY-ENGINE |
 | `denied`, `accept`, `beep`, `switch` | One-shot | Device and interface feedback | AUTHORED-BY-ENGINE |

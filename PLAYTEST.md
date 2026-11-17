@@ -6,7 +6,7 @@ driven in headless Chromium 159 (SwiftShader software GL).
 Reproduce everything here with:
 
 ```bash
-npm test                 # 12 routes, 259 checks
+npm test                 # 13 routes, 284 checks
 node test/vantages.mjs   # 24 in-world screenshots
 node test/ui-shots.mjs   # 24 interface screenshots
 ```
@@ -15,7 +15,7 @@ node test/ui-shots.mjs   # 24 interface screenshots
 
 ## 1. Result summary
 
-**259 / 259 checks passed across 12 routes, twice in a row. All three endings verified.**
+**284 / 284 checks passed across 13 routes. All three endings verified.**
 
 | Route | What it plays | Result |
 |---|---|---|
@@ -31,6 +31,7 @@ node test/ui-shots.mjs   # 24 interface screenshots
 | 10 | Release audit: placeholders, untextured geometry, unbound generators | clean ✓ |
 | 11 | Audio graph: every sound constructs and schedules in a live context | ✓ |
 | 12 | Real keyboard input: movement speeds, interaction, menus, a device panel | ✓ |
+| 13 | Hiding: invisible to the demon, and not a suspension | ✓ |
 
 How the harness plays: it picks real menu choices, presses real puzzle
 controls, walks with the real collision code and fires with the real hit check.
@@ -43,6 +44,82 @@ Route 12 exists because it catches a class of defect the others structurally
 cannot: routes 1–11 move the player with a scripted walker, which never touches
 the velocity model, so a movement bug is invisible to them. It found one — see
 §4.12.
+
+---
+
+## 1a. Human playtest round 1 — what was reported and what changed
+
+A human played the build. Four pieces of feedback, all acted on.
+
+### "Left and right are swapped" — real bug, fixed
+
+Strafing was mirrored. Forward is `(sin yaw, cos yaw)`, so right must be
+`cross(forward, up)` = `(-cos yaw, 0, sin yaw)`; the code used
+`(cos yaw, 0, -sin yaw)`, which is the *left* vector, so A and D were
+transposed. Fixed in `player.ts`, along with the stale `player.right`.
+
+Route 12 had asserted "A strafes sideways, not forward" — which passes
+perfectly well with the controls mirrored. It now asserts the **sign** of the
+displacement in both directions. This is the second bug in a row that only a
+human caught because the automated check was too weak, and the test is now
+strong enough to have caught it.
+
+### "The monster graphics were not scary at all" — rebuilt
+
+It was nine boxes. It is now 2.55 units of deliberately wrong proportions:
+
+- tapered 5-sided solids instead of plain boxes, which reads angular and
+  period-correct rather than like a mannequin
+- forward-pitched spine with four rib slats across the chest
+- long neck carrying a tapered skull **ahead of** the shoulders rather than on
+  top, with a hinged jaw that opens when it runs and gapes when it attacks
+- segmented legs with knees that bend backwards, and the two legs 0.86π out of
+  phase instead of exactly opposed, so the gait limps
+- segmented arms with the hands swinging below the knee
+- a head twitch overlaid on every state, snapping to a random offset at
+  irregular intervals — nothing alive moves its head in a clean sine wave, and
+  this is most of what sells it
+- skin reworked: a dark mass with drum-tight bone in patches. The first attempt
+  overcorrected to pale grey and read as a statue; dark body with a pale skull
+  is what actually works
+- face rebuilt from absence — oversized sunken sockets under a pale brow ridge,
+  vertical split mouth with irregular teeth
+
+Screenshots: `test/vantages/demon-close.png`, `demon-mid.png`,
+`demon-reveal-far.png`, `demon-lit.png`.
+
+### "The gun was too easy to find, in the wide open" — fixed, and the cause was mine
+
+The secret room was not the problem. I had put a **sign reading DRAUGHT** on
+the wall next to the false wall, which hands over the secret room and with it
+the good ending to anyone who walks past. That was my own over-signposting
+against a brief that asked for "a subtle environmental clue". Removed.
+
+What is left as the tell: the seam in the wall texture, the scratch marks
+beside it, and a new positional `draught` sound that plays near the false wall
+every few seconds. Inside, the gun is no longer lying on a crate with a glint
+on it — it is in a steel footlocker that has to be forced first, so finding the
+room is no longer the same as finding the weapon.
+
+To keep the good ending discoverable without the sign, the records memo now
+ends: *"containment left one on site. sealed store off the tunnels — you will
+not find the door, you have to feel the air move."*
+
+### "Add the ability to hide in objects" — added, see route 13
+
+Six hiding places: under the reception counter, under the records desk, under
+the generator control desk, inside the workshop locker, inside the locker bank
+at the tunnel mouth, and inside the crate in the maze sump.
+
+While hidden the demon **cannot see, hear or reach you** — sight, hearing and
+the catch check are all skipped. You keep a limited look arc (±0.75 rad in a
+locker, ±1.15 under a desk, ±0.6 in a crate) so you can watch it go past, and
+stamina recovers. Each kind frames the screen differently: louvre slats for a
+locker, a low letterbox for under a desk, a lid gap for a crate.
+
+The important design decision: **hiding is not suspension.** A device panel
+freezes the demon. Hiding leaves the world running, so it comes to where it
+last perceived you, searches, and gives up on its own. Verified in route 13.
 
 ---
 
@@ -202,6 +279,24 @@ cannot be trusted).
 | **R** | Resets the counter |
 | **Esc** | Steps back out; control restored; no key left stuck |
 
+### Route 13 — Hiding
+
+Took the diamond, triggered the reveal for real, broke east to the maze sump
+and got into the crate before it arrived. Then sat there while it hunted:
+
+| Check | Result |
+|---|---|
+| Reached the hiding place alive | phase `play`, 0 deaths |
+| Player hidden | ✓ |
+| Hiding does **not** suspend the demon | `suspended: false` throughout |
+| Still normal play, not a menu or puzzle mode | phase `play` |
+| It came looking while we were hidden | closest **10.05 units** — it homes on where it last perceived the player, not where they are |
+| It never caught the player | 0 deaths over 30 simulated seconds |
+| It was never suspended at any point | ✓ |
+| It lost the trail and gave up | `chase` → `patrol` |
+| Climbing out restores control on a walkable floor cell | ✓, region `maze`, and the player can walk again |
+| It can detect the player again once out of cover | `patrol` → `chase` |
+
 ### Route 11 — Audio
 
 The AudioContext reaches `running`, all 22 one-shots fire flat and positional
@@ -274,6 +369,10 @@ screenshots, and all are fixed in this build.
 9. Wall textures banded at an arbitrary mid-wall height; walls now take a whole
    number of vertical repeats so dados and riveted plates align.
 10. The diamond's halo was a flat square; it is now a stepped radial glow.
+11a. **Strafing was mirrored** — A and D transposed, because the right vector
+    was built as `(cos, -sin)` instead of `cross(forward, up)`. Shipped past 12
+    automated routes because the only strafe assertion checked that the player
+    moved sideways, not which way. Found by a human on first play.
 11. The first reveal was two dim pixels at 36 units through heavy fog. The
     demon now appears at 24 units, in front of a dedicated light fixture at the
     tunnel's end, with lifted self-illumination for that state only.

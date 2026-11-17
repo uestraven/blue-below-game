@@ -30,7 +30,8 @@ export type SfxName =
   | 'demon_die'
   | 'rumble'
   | 'drip'
-  | 'rat';
+  | 'rat'
+  | 'draught';
 
 interface Vec3 {
   x: number;
@@ -421,6 +422,12 @@ export class AudioEngine {
         break;
       case 'rat':
         this.noiseBurst(dest, t, 0.12, 4200, 5, 0.1 * gain, 'highpass');
+        break;
+      case 'draught':
+        // Air pulling through a gap in masonry. The only cue that the false
+        // wall is a wall with somewhere behind it.
+        this.noiseBurst(dest, t, 1.6, 1100, 1.1, 0.085 * gain, 'bandpass');
+        this.noiseBurst(dest, t + 0.25, 1.3, 2600, 0.9, 0.05 * gain, 'highpass');
         break;
     }
   }

@@ -45,6 +45,11 @@ export class Player {
   sprinting = false;
   /** Set while a puzzle or menu owns the view. */
   controlLocked = false;
+  /** Inside a hide spot: cannot move, cannot be perceived, limited look arc. */
+  hidden = false;
+  private hideCam: THREE.Vector3 | null = null;
+  private hideYaw = 0;
+  private hideYawRange = 1.15;
 
   private bobPhase = 0;
   private stepAccum = 0;
@@ -75,11 +80,73 @@ export class Player {
     this.viewTarget = target.clone();
   }
 
+  /**
+   * Climb into a hide spot. The player keeps a limited look arc so they can
+   * watch the demon go past, which is the entire appeal, but cannot move.
+   */
+  enterHide(cam: THREE.Vector3, yaw: number, yawRange: number): void {
+    this.hidden = true;
+    this.hideCam = cam.clone();
+    this.hideYaw = yaw;
+    this.hideYawRange = yawRange;
+    this.yaw = yaw;
+    this.pitch = 0;
+    this.velX = 0;
+    this.velZ = 0;
+    this.speed = 0;
+    this.sprinting = false;
+  }
+
+  /** Climb back out at `at`. */
+  exitHide(at: THREE.Vector3): void {
+    this.hidden = false;
+    this.hideCam = null;
+    this.x = at.x;
+    this.z = at.z;
+    this.velX = 0;
+    this.velZ = 0;
+    this.speed = 0;
+  }
+
   releaseView(): void {
     this.viewTarget = null;
   }
 
   update(dt: number, input: Input, grid: Grid, settings: Settings, audio: AudioEngine): void {
+    if (this.hidden && this.hideCam) {
+      // Look around within the arc the hiding place allows; no movement.
+      if (!this.controlLocked) {
+        const look = input.consumeLook();
+        const sens = 0.0021 * settings.sensitivity;
+        this.yaw -= look.x * sens;
+        this.pitch += (settings.invertY ? look.y : -look.y) * sens;
+        let rel = this.yaw - this.hideYaw;
+        while (rel > Math.PI) rel -= Math.PI * 2;
+        while (rel < -Math.PI) rel += Math.PI * 2;
+        rel = Math.max(-this.hideYawRange, Math.min(this.hideYawRange, rel));
+        this.yaw = this.hideYaw + rel;
+        this.pitch = Math.max(-0.7, Math.min(0.5, this.pitch));
+      }
+      this.velX = 0;
+      this.velZ = 0;
+      this.speed = 0;
+      this.sprinting = false;
+      // Stamina still recovers while you wait it out.
+      this.stamina = Math.min(1, this.stamina + STAMINA_REGEN * dt);
+      this.camera.position.copy(this.hideCam);
+      this.camera.rotation.set(0, 0, 0);
+      this.camera.rotateY(this.yaw + Math.PI);
+      this.camera.rotateX(this.pitch);
+      this.camera.updateMatrixWorld();
+      this.forward.set(
+        Math.sin(this.yaw) * Math.cos(this.pitch),
+        Math.sin(this.pitch),
+        Math.cos(this.yaw) * Math.cos(this.pitch),
+      );
+      this.right.set(-Math.cos(this.yaw), 0, Math.sin(this.yaw));
+      return;
+    }
+
     if (this.viewTarget) {
       // Smoothly settle onto the puzzle face, then hold.
       const dx = this.viewTarget.x - this.x;
@@ -133,9 +200,12 @@ export class Player {
 
     const sy = Math.sin(this.yaw);
     const cy = Math.cos(this.yaw);
-    // Forward is (sin yaw, cos yaw); right is (cos yaw, -sin yaw).
-    const wishX = iz * sy + ix * cy;
-    const wishZ = iz * cy - ix * sy;
+    // Forward is (sin yaw, cos yaw), so right is cross(forward, up), which is
+    // (-cos yaw, 0, sin yaw) - at yaw 0 the player faces +z and their right
+    // hand points down -x. Using (cos, -sin) here is the *left* vector and
+    // silently swaps A and D.
+    const wishX = iz * sy - ix * cy;
+    const wishZ = iz * cy + ix * sy;
 
     // Frame-rate independent approach to the target velocity.
     const targetX = wishX * maxSpeed;
@@ -189,7 +259,7 @@ export class Player {
     this.camera.updateMatrixWorld();
 
     this.forward.set(Math.sin(this.yaw) * Math.cos(this.pitch), Math.sin(this.pitch), Math.cos(this.yaw) * Math.cos(this.pitch));
-    this.right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    this.right.set(-Math.cos(this.yaw), 0, Math.sin(this.yaw));
   }
 
   get eyeY(): number {

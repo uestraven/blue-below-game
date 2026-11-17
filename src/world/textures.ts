@@ -402,23 +402,27 @@ export const SURFACE = {
 
   demonSkin: (): THREE.Texture =>
     make('surf.demon.skin', 64, 64, (g, rng) => {
-      // Dark, but not black: the player has to be able to read its shape
-      // against an unlit corridor, which is the whole point of a stalker.
-      fill(g, PAL.steel, 64, 64);
-      speckle(g, rng, 64, 64, [PAL.slate, PAL.steel, PAL.grey], 0.45);
-      grime(g, rng, 64, 64, PAL.blood, 6, 7);
-      grime(g, rng, 64, 64, PAL.ink, 5, 5);
-      // Stretched sinew.
-      g.strokeStyle = PAL.pale;
+      // Dark body, a few bright accents. A uniformly pale skin reads as a
+      // statue and a uniformly black one reads as a hole in the screen; what
+      // works is a dark mass with drum-tight bone showing through in patches,
+      // so the silhouette has edges without becoming a figurine.
+      fill(g, PAL.slate, 64, 64);
+      speckle(g, rng, 64, 64, [PAL.ink, PAL.slate, PAL.steel], 0.55);
+      grime(g, rng, 64, 64, PAL.ink, 9, 9);
+      grime(g, rng, 64, 64, PAL.bone, 2, 3);
+      grime(g, rng, 64, 64, PAL.blood, 4, 5);
+      // Sinew, stretched lengthwise.
       g.lineWidth = 1;
-      for (let i = 0; i < 12; i++) {
+      for (let i = 0; i < 14; i++) {
+        g.strokeStyle = i % 4 === 0 ? PAL.bone : PAL.grey;
         g.beginPath();
-        g.moveTo(rng.int(64), 0);
-        g.lineTo(rng.int(64), 63);
+        const x = rng.int(64);
+        g.moveTo(x, 0);
+        g.lineTo(x + rng.range(-6, 6), 63);
         g.stroke();
       }
       g.strokeStyle = PAL.ink;
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < 10; i++) {
         g.beginPath();
         g.moveTo(0, rng.int(64));
         g.lineTo(63, rng.int(64));
@@ -428,20 +432,39 @@ export const SURFACE = {
 
   demonFace: (): THREE.Texture =>
     make('surf.demon.face', 64, 64, (g, rng) => {
-      fill(g, PAL.slate, 64, 64);
-      speckle(g, rng, 64, 64, [PAL.steel, PAL.ink, PAL.blood], 0.35);
-      // two cold eyes and a split mouth; readable as a face even at 8 px tall
-      g.fillStyle = PAL.white;
-      g.fillRect(14, 22, 10, 6);
-      g.fillRect(40, 22, 10, 6);
+      // A face built from absence: two sunken sockets and a vertical split,
+      // not a cartoon face. Readable as wrong at eight pixels tall.
+      fill(g, PAL.steel, 64, 64);
+      speckle(g, rng, 64, 64, [PAL.grey, PAL.slate], 0.4);
+      grime(g, rng, 64, 64, PAL.ink, 6, 7);
+
+      // Sockets: deep black, larger than eyes should be.
       g.fillStyle = PAL.ink;
-      g.fillRect(18, 24, 3, 3);
-      g.fillRect(44, 24, 3, 3);
-      g.fillStyle = PAL.blood;
-      g.fillRect(16, 42, 32, 10);
+      for (const sx of [10, 36]) {
+        for (let y = 0; y < 16; y++) {
+          const w = 18 - Math.abs(y - 8);
+          g.fillRect(sx + (18 - w) / 2, 14 + y, w, 1);
+        }
+      }
+      // A pale brow ridge above them, so the sockets read as recessed.
       g.fillStyle = PAL.bone;
-      for (let i = 0; i < 8; i++) g.fillRect(17 + i * 4, 42, 2, 4);
-      for (let i = 0; i < 8; i++) g.fillRect(19 + i * 4, 48, 2, 4);
+      g.fillRect(6, 10, 52, 3);
+      g.fillStyle = PAL.pale;
+      g.fillRect(6, 13, 52, 1);
+
+      // Vertical split mouth, teeth as irregular slivers.
+      g.fillStyle = PAL.ink;
+      g.fillRect(26, 36, 12, 26);
+      g.fillStyle = PAL.bone;
+      for (let i = 0; i < 7; i++) {
+        const h = 3 + rng.int(4);
+        g.fillRect(26, 38 + i * 3, 3 + rng.int(2), h - 1);
+        g.fillRect(38 - 3 - rng.int(2), 38 + i * 3, 3 + rng.int(2), h - 1);
+      }
+      g.fillStyle = PAL.blood;
+      g.fillRect(29, 44, 6, 16);
+      // Cheek hollows.
+      grime(g, rng, 64, 64, PAL.ink, 3, 5);
     }),
 
   gunMetal: (): THREE.Texture =>

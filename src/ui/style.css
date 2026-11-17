@@ -723,3 +723,73 @@ body {
   letter-spacing: 0.2em;
   color: var(--pale);
 }
+
+/* ---------------------------------------------------------------- hiding */
+
+/* The view from inside a hiding place. Each kind frames the screen
+   differently so it is obvious what you are inside of, and all of them cut
+   the visible area down enough that watching the demon go past is tense
+   rather than comfortable. */
+
+.hud-hide {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s linear;
+}
+
+.hud-hide.on {
+  opacity: 1;
+}
+
+.hud-hide .slats {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.hud-hide .tagline {
+  position: absolute;
+  left: 50%;
+  bottom: 7%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  letter-spacing: 0.4em;
+  color: var(--pale);
+  text-shadow: 0 1px 0 #000;
+}
+
+/* Locker: looking out through a louvred door. */
+.hud-hide.locker .slats {
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(2, 3, 5, 0.97) 0,
+      rgba(2, 3, 5, 0.97) 14px,
+      rgba(2, 3, 5, 0) 14px,
+      rgba(2, 3, 5, 0) 34px
+    ),
+    radial-gradient(ellipse at 50% 50%, rgba(0, 0, 0, 0) 38%, rgba(0, 0, 0, 0.95) 85%);
+  box-shadow: inset 0 0 0 7vw rgba(2, 3, 5, 0.97);
+}
+
+/* Under a desk or counter: a low letterbox at floor level. */
+.hud-hide.under .slats {
+  background: radial-gradient(ellipse at 50% 62%, rgba(0, 0, 0, 0) 30%, rgba(0, 0, 0, 0.96) 78%);
+  box-shadow:
+    inset 0 22vh 0 0 rgba(2, 3, 5, 0.97),
+    inset 0 -6vh 0 0 rgba(2, 3, 5, 0.9),
+    inset 14vw 0 0 0 rgba(2, 3, 5, 0.95),
+    inset -14vw 0 0 0 rgba(2, 3, 5, 0.95);
+}
+
+/* Crate: a narrow gap under a part-closed lid. */
+.hud-hide.crate .slats {
+  background: radial-gradient(ellipse at 50% 55%, rgba(0, 0, 0, 0) 22%, rgba(0, 0, 0, 0.97) 70%);
+  box-shadow:
+    inset 0 30vh 0 0 rgba(2, 3, 5, 0.98),
+    inset 0 -18vh 0 0 rgba(2, 3, 5, 0.98),
+    inset 22vw 0 0 0 rgba(2, 3, 5, 0.97),
+    inset -22vw 0 0 0 rgba(2, 3, 5, 0.97);
+}
