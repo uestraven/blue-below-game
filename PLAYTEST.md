@@ -6,7 +6,7 @@ driven in headless Chromium 159 (SwiftShader software GL).
 Reproduce everything here with:
 
 ```bash
-npm test                 # 19 routes, 518 checks
+npm test                 # 19 routes, 521 checks
 node test/vantages.mjs   # 24 in-world screenshots
 node test/ui-shots.mjs   # 24 interface screenshots
 ```
@@ -15,7 +15,7 @@ node test/ui-shots.mjs   # 24 interface screenshots
 
 ## 1. Result summary
 
-**518 / 518 checks passed across 19 routes. All three endings verified.**
+**521 / 521 checks passed across 19 routes. All three endings verified.**
 
 | Route | What it plays | Result |
 |---|---|---|
@@ -224,6 +224,15 @@ The demon's senses and state machine were rewritten.
 
 ### Defects found while building it
 
+0. **The sealed store was open on one whole side.** Reported by the playtester.
+   The room was carved at `gz 5..7` and the south-east tunnel runs `gz 8..9`
+   across `gx 16..25`, so the two were adjacent with no wall row between them
+   and the room's entire south face opened into the corridor — the "hidden"
+   room was a wide alcove, and the false wall was decoration. Moved to
+   `gz 4..6` so `gz 7` stays solid. Route 8 now walks the room's whole
+   perimeter and asserts there is exactly one opening and that it is the false
+   wall, so this cannot regress silently.
+
 1. **My own release-gate check produced a false positive.** The asset audit has
    to skip the debug group, which put the literal `ai-debug` in the release
    bundle and tripped the check looking for it. Narrowed to strings that exist
@@ -346,6 +355,7 @@ carved cells reachable from the player's start** — no orphaned geometry.
 | Tight corner: F branch (the escape loop) | ✓ |
 | Tight corner: pump chamber → north tunnel | ✓ |
 | Tight corner: entry hall → west tunnel | ✓ |
+| **The sealed store is enclosed on all four sides** | exactly **one** opening, and it is the false wall at (18, 6); all 12 room cells walkable |
 | False wall, eastward | Passes through into `secret` |
 | False wall, westward | Passes back out into `maze` |
 | Locked front door | Stops the player short of the threshold; crossing while locked does not end the run |

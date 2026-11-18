@@ -1051,8 +1051,9 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
   // go.
   addBox(cx(21), 0.5, cz(5), 1.0, 1.0, 1.0, { tex: T.crate, collide: true, uvScale: 1 });
   addBox(cx(22), 0.9, cz(5), 0.9, 1.8, 0.9, { tex: T.locker, collide: true, uvScale: 1 });
-  // A sheet over something that is the right size for a person.
-  addBox(cx(21), 0.22, cz(7), 1.4, 0.44, 0.8, { tex: T.bone, rotY: 0.12, collide: true, uvScale: 1 });
+  // A sheet over something that is the right size for a person. Kept on the
+  // north row, clear of the entrance at (19, 6) and of the seal at (20, 6).
+  addBox(cx(22), 0.22, cz(4), 1.4, 0.44, 0.8, { tex: T.bone, rotY: 0.12, collide: true, uvScale: 1 });
 
   // The pentagram: a glowing seal cut into the floor of the sealed store. Not
   // a pickup - a place where something has to be put.
@@ -1121,7 +1122,7 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
 
   const secretNote = addPlate(
     19,
-    5,
+    4,
     '-z',
     1.6,
     1.7,

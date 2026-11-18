@@ -2032,6 +2032,8 @@ export class Game {
         return d;
       },
       regionAt: (x: number, z: number) => this.grid.regionIdAt(x, z),
+      /** Raw cell type: 0 solid, 1 floor, 2 false wall. */
+      cellAt: (gx: number, gz: number) => this.grid.cellAt(gx, gz),
       thresholdZ: () => FRONT_DOOR.thresholdZ,
       playerEyeY: () => this.player.camera.position.y,
       /** The chase-balance numbers, so a test can assert the relationship. */

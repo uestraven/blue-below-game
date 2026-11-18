@@ -234,7 +234,12 @@ export const REGIONS: RegionDef[] = [
   {
     id: 'secret',
     name: 'Sealed Store',
-    carve: [{ x0: 19, z0: 5, x1: 22, z1: 7 }],
+    // gz 4..6, deliberately NOT 5..7: the south-east tunnel runs along gz 8-9
+    // across gx 16-25, so a room reaching gz 7 sits directly against it with
+    // no wall row between, and the whole south side of the sealed store opens
+    // into the corridor. Ending at gz 6 leaves gz 7 solid, which makes the
+    // false wall at (18, 6) the only way in or out.
+    carve: [{ x0: 19, z0: 4, x1: 22, z1: 6 }],
     ceiling: 2.6,
     floor: 'floorGrate',
     wall: 'wallRust',
@@ -338,7 +343,7 @@ export const LIGHTS: LightDef[] = [
   { gx: 5, gz: 3, y: 2.4, color: [0.74, 0.8, 0.92], range: 16, intensity: 0.5, fixture: 'strip' },
 
   // Secret store: one dull red emergency lamp.
-  { gx: 20, gz: 6, y: 2.3, color: [1, 0.3, 0.26], range: 10, intensity: 0.45, fixture: 'bulb' },
+  { gx: 20, gz: 5, y: 2.3, color: [1, 0.3, 0.26], range: 10, intensity: 0.45, fixture: 'bulb' },
 
   // Vault approach and chamber: cold blue. Visible from the far end of the maze.
   { gx: 32, gz: 4, y: 2.6, color: [0.5, 0.82, 1], range: 14, intensity: 0.6, fixture: 'strip' },

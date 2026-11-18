@@ -908,11 +908,41 @@ async function route8(api, page) {
     check(`tight corner: ${label}`, await api.call('walkTo', tx, tz, 6000, 4.3));
   }
 
+  // --- the sealed store is sealed ---------------------------------------
+  // Its only opening must be the false wall. The south-east tunnel runs along
+  // gz 8-9 right underneath it, so a room one row too deep opens straight into
+  // the corridor and the "hidden" room is simply a wide alcove.
+  const ROOM = { x0: 19, z0: 4, x1: 22, z1: 6 };
+  const inRoom = (gx, gz) => gx >= ROOM.x0 && gx <= ROOM.x1 && gz >= ROOM.z0 && gz <= ROOM.z1;
+  const openings = [];
+  let roomCells = 0;
+  for (let gz = ROOM.z0 - 1; gz <= ROOM.z1 + 1; gz++) {
+    for (let gx = ROOM.x0 - 1; gx <= ROOM.x1 + 1; gx++) {
+      if (inRoom(gx, gz)) {
+        if ((await api.call('cellAt', gx, gz)) !== 0) roomCells++;
+        continue;
+      }
+      const touches = [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ].some(([dx, dz]) => inRoom(gx + dx, gz + dz));
+      if (!touches) continue;
+      const cell = await api.call('cellAt', gx, gz);
+      if (cell !== 0) openings.push(`${gx},${gz}=${cell}`);
+    }
+  }
+  eq('the sealed store is fully enclosed on all four sides', openings.length, 1);
+  check('and its one opening is the false wall', openings[0] === '18,6=2', openings.join(' '));
+  eq('the room itself is all walkable', roomCells, 12);
+
   // --- through the false wall in both directions -----------------------
   await api.call('teleportCell', 17, 6);
   await api.step(1 / 60, 4);
-  check('walked east through the false wall', await api.call('walkTo', (21.5 - 32) * 3, (6.5 - 26) * 3, 3000, 4.3));
-  eq('inside the sealed store', await api.call('regionAt', (21.5 - 32) * 3, (6.5 - 26) * 3), 'secret');
+  // Cell (20, 5): clear of the crate at (21, 5) and the locker at (22, 5).
+  check('walked east through the false wall', await api.call('walkTo', (20.5 - 32) * 3, (5.5 - 26) * 3, 3000, 4.3));
+  eq('inside the sealed store', await api.call('regionAt', (20.5 - 32) * 3, (5.5 - 26) * 3), 'secret');
   check('walked back west out through it', await api.call('walkTo', (16.5 - 32) * 3, (6.5 - 26) * 3, 3000, 4.3));
   eq('back in the tunnel', await api.call('regionAt', (16.5 - 32) * 3, (6.5 - 26) * 3), 'maze');
 
