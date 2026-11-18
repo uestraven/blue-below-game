@@ -35,7 +35,10 @@ const VANTAGES = [
   { name: 'maze-dark', cell: [8, 11], look: [-90.0, -46.5], note: 'the dark west tunnel' },
   { name: 'pump-chamber', cell: [4, 8], look: [-96.0, -52.5], note: 'pump room, blood letter I' },
   { name: 'false-wall-seam', cell: [17, 6], look: [-42.0, -58.5], note: 'the seam and the draught sign' },
-  { name: 'secret-room', cell: [21, 6], look: [-34.5, -58.5], progress: { secretFound: true }, note: 'the gun on the crate' },
+  { name: 'secret-room', cell: [22, 7], look: [-34.5, -58.5], progress: { secretFound: true }, note: 'the glowing seal in the floor' },
+  { name: 'pentagram-close', cell: [20, 7], look: [-34.5, -58.5], progress: { secretFound: true }, note: 'the pentagram up close' },
+  { name: 'records-flaregun', cell: [27, 41], look: [-16.5, -61.5], note: 'emergency signal kit and the personal box' },
+  { name: 'personal-box', cell: [20, 44], look: [-37.5, -55.5], note: "Harding's locked personal box" },
   { name: 'reveal-corridor', cell: [15, 4], look: [-82.5, -67.5], note: 'the straight tunnel the demon appears down' },
   { name: 'vault-approach', cell: [33, 4], look: [45, -64.5], note: 'blue light from the vault' },
   { name: 'vault-diamond', cell: [43, 7], look: [45, -55.5], note: 'the diamond on its pedestal' },
@@ -77,6 +80,13 @@ async function main() {
   page.on('pageerror', (e) => console.log('PAGEERROR', e.message));
   await page.goto(ORIGIN, { waitUntil: 'load' });
   await page.waitForFunction('window.__BB_READY === true', null, { timeout: 60000 });
+  // These scripts drive the game through window.__BB, which only exists in the
+  // `test` build mode. Say so plainly rather than failing on `undefined`.
+  if (!(await page.evaluate(() => typeof window.__BB === 'object'))) {
+    throw new Error(
+      'dist/ has no debug table: it is a release build. Run `npm run build:test` first.',
+    );
+  }
 
   await page.evaluate(() => {
     window.__BB.start(4242);

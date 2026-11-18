@@ -38,6 +38,13 @@ async function main() {
   page.on('pageerror', (e) => console.log('PAGEERROR', e.message));
   await page.goto(ORIGIN, { waitUntil: 'load' });
   await page.waitForFunction('window.__BB_READY === true', null, { timeout: 60000 });
+  // These scripts drive the game through window.__BB, which only exists in the
+  // `test` build mode. Say so plainly rather than failing on `undefined`.
+  if (!(await page.evaluate(() => typeof window.__BB === 'object'))) {
+    throw new Error(
+      'dist/ has no debug table: it is a release build. Run `npm run build:test` first.',
+    );
+  }
 
   const ev = (fn, arg) => page.evaluate(fn, arg);
   const shot = async (name) => {
@@ -178,6 +185,25 @@ async function main() {
     BB.forceCatch();
   });
   await shot('21-death');
+
+  // The ritual chain: the seal, armed and resolved.
+  await ev(() => {
+    const BB = window.__BB;
+    BB.closePuzzle?.();
+    BB.use('box-key');
+    BB.use('personal-box');
+    BB.use('cross');
+    BB.use('pentagram');
+  });
+  await shot('25-ritual-decision');
+  await ev(() => window.__BB.pick('NOT YET'));
+  await ev(() => {
+    const BB = window.__BB;
+    BB.use('pentagram');
+    BB.pick('PLACE THE CROSS');
+    BB.step(1 / 60, 20);
+  });
+  await shot('26-ritual-sequence');
 
   // All three endings. finishEnding is one-shot per run by design, so the
   // phase is reset between captures.

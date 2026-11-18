@@ -22,7 +22,19 @@ import {
   type ClueAnchor,
 } from './layout';
 import type { Aabb } from './grid';
-import { SURFACE, signTexture, bloodLetterDecal, scratchMarkTexture, safeFaceTexture, breakerFaceTexture, lockFaceTexture, diagramTexture, flatTexture, glowTexture } from './textures';
+import {
+  SURFACE,
+  signTexture,
+  bloodLetterDecal,
+  scratchMarkTexture,
+  safeFaceTexture,
+  breakerFaceTexture,
+  lockFaceTexture,
+  diagramTexture,
+  flatTexture,
+  glowTexture,
+  pentagramTexture,
+} from './textures';
 import { PAL } from './palette';
 import type { PsxRenderer } from '../render/psx';
 import type { WorldBuild } from './build';
@@ -82,12 +94,25 @@ export interface PropsBuild {
   breakerAnchor: { pos: THREE.Vector3; normal: THREE.Vector3 };
   lockAnchor: { pos: THREE.Vector3; normal: THREE.Vector3 };
   diamondAnchor: { pos: THREE.Vector3; normal: THREE.Vector3 };
-  gunAnchor: { pos: THREE.Vector3; normal: THREE.Vector3 | null };
   /** Mutable visuals the game toggles. */
   diamondMesh: THREE.Group;
-  gunMesh: THREE.Group;
-  footlockerLid: THREE.Mesh;
-  footlockerAnchor: { pos: THREE.Vector3 };
+  /** The flare gun pickup, in the records annex emergency station. */
+  flareGunMesh: THREE.Group;
+  flareGunAnchor: { pos: THREE.Vector3 };
+  /** The three loose flare cartridges. */
+  flarePickups: Array<{ id: string; mesh: THREE.Group; pos: THREE.Vector3; where: string }>;
+  /** Harding's personal box, its lid, and the cross inside it. */
+  personalBoxLid: THREE.Mesh;
+  personalBoxAnchor: { pos: THREE.Vector3 };
+  crossMesh: THREE.Group;
+  crossAnchor: { pos: THREE.Vector3 };
+  /** The brass key that opens the personal box. */
+  boxKeyMesh: THREE.Group;
+  boxKeyAnchor: { pos: THREE.Vector3 };
+  /** The seal in the sealed store, and the cross once placed in it. */
+  pentagram: THREE.Group;
+  pentagramAnchor: { pos: THREE.Vector3 };
+  placedCross: THREE.Group;
   safeDoor: THREE.Mesh;
   breakerDoor: THREE.Mesh;
   doorLeaves: THREE.Group;
@@ -253,6 +278,26 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
     });
   };
 
+  /** A small floating glint so a hand-sized pickup is findable in the dark. */
+  const pickupGlint = (parent: THREE.Group, color: string, size: number, base: number): void => {
+    const g = new THREE.PlaneGeometry(size, size);
+    g.setAttribute('color', new THREE.Float32BufferAttribute(new Array(g.attributes.position.count * 3).fill(1), 3));
+    const m = psx.createMaterial({
+      map: glowTexture(color),
+      jitter: 0,
+      affine: 0,
+      emissive: base,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    m.uniforms.uOpacity.value = 0.45;
+    const mesh = new THREE.Mesh(g, m);
+    parent.add(mesh);
+    (parent as THREE.Group & { userData: { glint?: THREE.Mesh } }).userData.glint = mesh;
+    glows.push({ mat: m, base, rate: 0.55 });
+  };
+
   const T = {
     metal: SURFACE.metalDark(),
     machine: SURFACE.machine(),
@@ -264,14 +309,95 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
     painted: SURFACE.wallPainted(),
     rust: SURFACE.wallRust(),
     vault: SURFACE.wallVault(),
-    gunMetal: SURFACE.gunMetal(),
     gunGrip: SURFACE.gunGrip(),
+    flareBody: SURFACE.flareBody(),
+    flareShell: SURFACE.flareShell(),
+    flareTip: flatTexture('flaretip', PAL.bloodLit),
     bone: flatTexture('bone', PAL.bone),
     blue: flatTexture('blue', PAL.blue),
     amber: flatTexture('amber', PAL.amber),
     red: flatTexture('red', PAL.bloodLit),
     green: flatTexture('green', PAL.mossLit),
     dark: flatTexture('dark', PAL.ink),
+  };
+
+  /** Break-barrelled signal pistol: fat muzzle, short body, angled grip. */
+  const buildFlareGunPickup = (at: THREE.Vector3): THREE.Group => {
+    const grp = new THREE.Group();
+    const part = (w: number, h: number, d: number, ox: number, oy: number, oz: number, tex: THREE.Texture): void => {
+      const g = new THREE.BoxGeometry(w, h, d);
+      bakeGeometry(g, at);
+      const m = new THREE.Mesh(g, psx.createMaterial({ map: tex, jitter: 0.6, affine: 0.3 }));
+      m.position.set(ox, oy, oz);
+      grp.add(m);
+    };
+    part(0.14, 0.15, 0.3, 0, 0.05, 0.08, T.flareBody); // fat barrel
+    part(0.1, 0.12, 0.16, 0, 0.02, -0.11, T.flareBody); // breech
+    part(0.07, 0.24, 0.1, 0, -0.12, -0.17, T.gunGrip); // grip
+    part(0.05, 0.07, 0.05, 0, -0.04, -0.07, T.flareBody); // trigger guard
+    pickupGlint(grp, PAL.amber, 0.7, 0.75);
+    grp.position.copy(at);
+    grp.rotation.y = 0.4;
+    root.add(grp);
+    return grp;
+  };
+
+  /** A single loose flare cartridge standing on end. */
+  const buildFlarePickup = (at: THREE.Vector3): THREE.Group => {
+    const grp = new THREE.Group();
+    const g = new THREE.CylinderGeometry(0.045, 0.045, 0.2, 6);
+    bakeGeometry(g, at);
+    const body = new THREE.Mesh(g, psx.createMaterial({ map: T.flareShell, jitter: 0.5, affine: 0.2, emissive: 0.25 }));
+    grp.add(body);
+    const capGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.04, 6);
+    bakeGeometry(capGeo, at);
+    const cap = new THREE.Mesh(capGeo, psx.createMaterial({ map: T.flareTip, jitter: 0.5, affine: 0, emissive: 0.9 }));
+    cap.position.y = 0.12;
+    grp.add(cap);
+    pickupGlint(grp, PAL.bloodLit, 0.5, 0.7);
+    grp.position.copy(at);
+    root.add(grp);
+    return grp;
+  };
+
+  /** A small key, colour-coded so the two keys are never confused. */
+  const buildKeyPickup = (at: THREE.Vector3, color: string): THREE.Group => {
+    const grp = new THREE.Group();
+    const tex = flatTexture(`key-${color}`, color);
+    const part = (w: number, h: number, d: number, ox: number, oy: number, oz: number): void => {
+      const g = new THREE.BoxGeometry(w, h, d);
+      bakeGeometry(g, at);
+      const m = new THREE.Mesh(g, psx.createMaterial({ map: tex, jitter: 0.5, affine: 0.2, emissive: 0.4 }));
+      m.position.set(ox, oy, oz);
+      grp.add(m);
+    };
+    part(0.05, 0.05, 0.3, 0, 0, 0);
+    part(0.14, 0.14, 0.04, 0, 0, -0.16);
+    part(0.1, 0.04, 0.04, 0.04, 0, 0.12);
+    pickupGlint(grp, color, 0.45, 0.7);
+    grp.position.copy(at);
+    grp.rotation.y = 0.6;
+    root.add(grp);
+    return grp;
+  };
+
+  /** The cross, as a pickup inside the personal box. */
+  const buildCrossPickup = (at: THREE.Vector3): THREE.Group => {
+    const grp = new THREE.Group();
+    const tex = T.bone;
+    const part = (w: number, h: number, d: number, oy: number): void => {
+      const g = new THREE.BoxGeometry(w, h, d);
+      bakeGeometry(g, at);
+      const m = new THREE.Mesh(g, psx.createMaterial({ map: tex, jitter: 0.4, affine: 0.2, emissive: 0.5 }));
+      m.position.set(0, oy, 0);
+      grp.add(m);
+    };
+    part(0.06, 0.34, 0.06, 0.17);
+    part(0.22, 0.06, 0.06, 0.25);
+    pickupGlint(grp, PAL.white, 0.5, 0.6);
+    grp.position.copy(at);
+    root.add(grp);
+    return grp;
   };
 
   // =====================================================================
@@ -498,8 +624,17 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
       '',
       'And lower still, almost off the page:',
       '',
-      '  "containment left one on site. sealed store off the tunnels -',
-      '   you will not find the door, you have to feel the air move."',
+      '  "there is a sealed store off the tunnels. you will not find the',
+      '   door, you have to feel the air move. what is cut into the floor',
+      '   in there will take it, but only if you give the floor something",',
+      '',
+      '  "something consecrated. harding kept his in that box and he never',
+      '   let the key out of his sight. look where he used to wash his',
+      '   hands."',
+      '',
+      'The last line is circled twice:',
+      '',
+      '  "a flare will only ever buy you a minute."',
     ],
     pos: memo.pos,
     normal: memo.normal,
@@ -515,6 +650,47 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
     0.8,
     signTexture('records-sign', ['RECORDS'], { bg: PAL.steel, fg: PAL.bone, width: 256, height: 128, size: 44 }),
   );
+
+  // Site emergency station in the records annex: where the flare gun lives.
+  addBox(cx(27), 1.15, lz(39) + 0.3, 1.1, 1.4, 0.5, { tex: T.metal, uvScale: 1, collide: true });
+  addPlate(
+    27,
+    39,
+    '-z',
+    1.15,
+    0.95,
+    0.95,
+    signTexture('emergency-station', ['EMERGENCY', 'SIGNAL KIT', '1 PISTOL', '1 CARTRIDGE'], {
+      bg: PAL.blood,
+      fg: PAL.white,
+      width: 256,
+      height: 256,
+      size: 22,
+    }),
+    { inset: 0.28 },
+  );
+  const flareGunMesh = buildFlareGunPickup(new THREE.Vector3(cx(27), 1.18, lz(39) + 0.02));
+
+  // Harding's personal box, locked, in the same annex. Discoverable long
+  // before the brass key that opens it.
+  addBox(cx(19), 1.85, cz(44), 1.1, 0.5, 0.95, { tex: T.metal, uvScale: 1, collide: true });
+  const boxLidGeo = new THREE.BoxGeometry(1.15, 0.1, 1.0);
+  boxLidGeo.translate(0, 0, -0.5);
+  bakeGeometry(boxLidGeo, new THREE.Vector3(cx(19), 2.12, cz(44)));
+  const personalBoxLid = new THREE.Mesh(boxLidGeo, psx.createMaterial({ map: T.metal, jitter: 0.8, affine: 0.4 }));
+  personalBoxLid.position.set(cx(19), 2.12, cz(44) + 0.5);
+  root.add(personalBoxLid);
+  addPlate(
+    19,
+    44,
+    '+z',
+    2.3,
+    0.9,
+    0.45,
+    signTexture('box-tag', ['R. HARDING'], { bg: PAL.rust, fg: PAL.bone, width: 256, height: 128, size: 30 }),
+    { inset: 0.52 },
+  );
+  const crossMesh = buildCrossPickup(new THREE.Vector3(cx(19), 1.95, cz(44)));
 
   // =====================================================================
   // CORRIDOR A / A2 - the stretch the player will run back down.
@@ -534,6 +710,14 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
     signTexture('corrA-sign', ['GENERATOR ROOM', 'AHEAD'], { bg: PAL.steel, fg: PAL.bone, width: 256, height: 128, size: 26 }),
   );
   addBox(cx(46), 0.6, cz(31), 1.0, 1.2, 1.0, { tex: T.crate, collide: true, uvScale: 1 });
+  // Flare 1 of 3, on the crate in the optional parallel corridor.
+  const flarePickups: Array<{ id: string; mesh: THREE.Group; pos: THREE.Vector3; where: string }> = [];
+  flarePickups.push({
+    id: 'flare-corrA2',
+    mesh: buildFlarePickup(new THREE.Vector3(cx(46), 1.32, cz(31))),
+    pos: new THREE.Vector3(cx(46), 1.32, cz(31)),
+    where: 'Corridor A2, on a crate',
+  });
 
   // =====================================================================
   // GENERATOR ROOM - breaker cabinet, maintenance diagram, clue IV.
@@ -613,6 +797,15 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
     0.95,
     signTexture('breaker-sign', ['MAIN BREAKER', 'PANEL'], { bg: PAL.moss, fg: PAL.white, width: 256, height: 128, size: 26 }),
   );
+
+  // Flare 2 of 3, on the shelf beside the breaker cabinet.
+  addBox(lx(51) - 0.3, 1.0, cz(24), 0.6, 0.08, 1.2, { tex: T.metal, uvScale: 1 });
+  flarePickups.push({
+    id: 'flare-generator',
+    mesh: buildFlarePickup(new THREE.Vector3(lx(51) - 0.4, 1.14, cz(24))),
+    pos: new THREE.Vector3(lx(51) - 0.4, 1.14, cz(24)),
+    where: 'Generator hall, shelf by the breaker cabinet',
+  });
 
   const diagram = addPlate(50, 19, '+x', 1.7, 1.9, 1.9, diagramTexture([...run.breakerOrder]), { inset: 0.08 });
   readables.push({
@@ -772,6 +965,8 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
   addCylinder(cx(5), 2.0, cz(8), 0.22, 1.2, 6, T.pipe);
   addBox(cx(4), 2.3, cz(9), 0.25, 0.25, 6.0, { tex: T.pipe, uvScale: 2 });
   addBox(cx(4), 0.06, cz(10), 2.4, 0.12, 2.4, { tex: T.metal, uvScale: 1 });
+  // The brass key, on the pump housing where Harding left it.
+  const boxKeyMesh = buildKeyPickup(new THREE.Vector3(cx(5), 1.68, cz(8)), PAL.amber);
 
   // Landmark 3: collapsed shelving in the south-east tunnel (clue II opposite).
   addBox(cx(21), 0.9, lz(8) + 0.45, 3.4, 1.8, 0.7, { tex: T.locker, rotY: 0.08, collide: true, uvScale: 1 });
@@ -801,6 +996,13 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
     1.0,
     signTexture('sump', ['SUMP - NO EXIT'], { bg: PAL.rust, fg: PAL.bone, width: 256, height: 128, size: 26 }),
   );
+  // Flare 3 of 3, dropped in the sump dead end.
+  flarePickups.push({
+    id: 'flare-sump',
+    mesh: buildFlarePickup(new THREE.Vector3(cx(26), 0.12, cz(11))),
+    pos: new THREE.Vector3(cx(26), 0.12, cz(11)),
+    where: 'Maze sump, on the floor',
+  });
 
   // Tunnel route markers, so the maze is learnable rather than arbitrary.
   addPlate(
@@ -842,64 +1044,79 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
   // secret room, and with it the good ending, to anyone who walks past.
 
   // =====================================================================
-  // SECRET STORE - behind the false wall. The gun, and why it is here.
+  // SECRET STORE - behind the false wall. The seal, and what it is for.
   // =====================================================================
-  addBox(cx(20), 0.5, cz(6), 1.3, 1.0, 1.3, { tex: T.crate, collide: true, uvScale: 1 });
-  addBox(cx(22), 0.9, cz(5), 1.0, 1.8, 1.0, { tex: T.locker, collide: true, uvScale: 1 });
+  // Kept clear of the walls and of the false-wall entrance at (19, 6): the
+  // room is only four cells by three and a body wedged in here has nowhere to
+  // go.
+  addBox(cx(21), 0.5, cz(5), 1.0, 1.0, 1.0, { tex: T.crate, collide: true, uvScale: 1 });
+  addBox(cx(22), 0.9, cz(5), 0.9, 1.8, 0.9, { tex: T.locker, collide: true, uvScale: 1 });
   // A sheet over something that is the right size for a person.
-  addBox(cx(21), 0.22, cz(7), 2.2, 0.44, 0.9, { tex: T.bone, rotY: 0.12, collide: true, uvScale: 1 });
+  addBox(cx(21), 0.22, cz(7), 1.4, 0.44, 0.8, { tex: T.bone, rotY: 0.12, collide: true, uvScale: 1 });
 
-  // Steel footlocker. The gun is inside it and invisible until it is forced,
-  // so finding the room is no longer the same as finding the weapon.
-  addBox(cx(21), 0.3, cz(6) + 0.6, 1.5, 0.6, 0.8, { tex: T.metal, uvScale: 1, collide: true });
-  const lidGeo = new THREE.BoxGeometry(1.55, 0.12, 0.85);
-  lidGeo.translate(0, 0, -0.42); // hinge along the back edge
-  bakeGeometry(lidGeo, new THREE.Vector3(cx(21), 0.62, cz(6) + 0.6));
-  const footlockerLid = new THREE.Mesh(lidGeo, psx.createMaterial({ map: T.metal, jitter: 0.8, affine: 0.4 }));
-  footlockerLid.position.set(cx(21), 0.62, cz(6) + 1.02);
-  root.add(footlockerLid);
-  addPlate(
-    21,
-    5,
-    '-z',
-    1.5,
-    1.5,
-    0.75,
-    signTexture('containment-tag', ['CONTAINMENT', 'ISSUE 1 OF 1'], {
-      bg: PAL.rust,
-      fg: PAL.bone,
-      width: 256,
-      height: 128,
-      size: 22,
-    }),
-  );
-
-  const gunMesh = new THREE.Group();
+  // The pentagram: a glowing seal cut into the floor of the sealed store. Not
+  // a pickup - a place where something has to be put.
+  const pentagram = new THREE.Group();
   {
-    const gpos = new THREE.Vector3(cx(21), 0.42, cz(6) + 0.6);
-    const mkPart = (
-      w: number,
-      h: number,
-      d: number,
-      ox: number,
-      oy: number,
-      oz: number,
-      tex: THREE.Texture,
-    ): THREE.Mesh => {
-      const g = new THREE.BoxGeometry(w, h, d);
-      bakeGeometry(g, gpos);
-      const m = new THREE.Mesh(g, psx.createMaterial({ map: tex, jitter: 0.6, affine: 0.3 }));
-      m.position.set(ox, oy, oz);
-      return m;
-    };
-    gunMesh.add(mkPart(0.09, 0.1, 0.52, 0, 0.04, 0.04, T.gunMetal)); // barrel
-    gunMesh.add(mkPart(0.13, 0.17, 0.17, 0, 0, -0.15, T.gunMetal)); // cylinder
-    gunMesh.add(mkPart(0.08, 0.26, 0.11, 0, -0.16, -0.24, T.gunGrip)); // grip
-    gunMesh.add(mkPart(0.05, 0.08, 0.06, 0, -0.07, -0.12, T.gunMetal)); // trigger guard
-    gunMesh.position.copy(gpos);
-    gunMesh.rotation.y = 0.35;
-    gunMesh.scale.setScalar(1.15);
-    root.add(gunMesh);
+    const ppos = new THREE.Vector3(cx(20), 0.02, cz(6));
+    const geo = new THREE.PlaneGeometry(2.5, 2.5);
+    geo.rotateX(-Math.PI / 2);
+    geo.setAttribute(
+      'color',
+      new THREE.Float32BufferAttribute(new Array(geo.attributes.position.count * 3).fill(1), 3),
+    );
+    const mat = psx.createMaterial({
+      map: pentagramTexture(),
+      jitter: 0,
+      affine: 0,
+      emissive: 1.15,
+      alphaTest: 0.25,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    pentagram.add(mesh);
+    glows.push({ mat, base: 1.15, rate: 0.35 });
+    // A low haze above the seal so it reads as light coming out of the floor.
+    const hazeGeo = new THREE.PlaneGeometry(2.2, 2.2);
+    hazeGeo.setAttribute(
+      'color',
+      new THREE.Float32BufferAttribute(new Array(hazeGeo.attributes.position.count * 3).fill(1), 3),
+    );
+    const hazeMat = psx.createMaterial({
+      map: glowTexture(PAL.bloodLit),
+      jitter: 0,
+      affine: 0,
+      emissive: 0.55,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    hazeMat.uniforms.uOpacity.value = 0.3;
+    const haze = new THREE.Mesh(hazeGeo, hazeMat);
+    haze.position.set(0, 0.5, 0);
+    pentagram.add(haze);
+    (pentagram as THREE.Group & { userData: { haze: THREE.Mesh } }).userData.haze = haze;
+    glows.push({ mat: hazeMat, base: 0.55, rate: 0.5 });
+    pentagram.position.copy(ppos);
+    root.add(pentagram);
+  }
+
+  // The cross, once placed. Hidden until the ritual starts.
+  const placedCross = new THREE.Group();
+  {
+    const cpos = new THREE.Vector3(cx(20), 0.1, cz(6));
+    const upright = new THREE.BoxGeometry(0.09, 0.62, 0.09);
+    const arm = new THREE.BoxGeometry(0.4, 0.09, 0.09);
+    for (const g of [upright, arm]) bakeGeometry(g, cpos);
+    const mat = psx.createMaterial({ map: T.bone, jitter: 0.4, affine: 0.2, emissive: 0.7 });
+    const a = new THREE.Mesh(upright, mat);
+    a.position.y = 0.31;
+    const b = new THREE.Mesh(arm, mat);
+    b.position.y = 0.46;
+    placedCross.add(a, b);
+    placedCross.position.copy(cpos);
+    placedCross.visible = false;
+    root.add(placedCross);
+    glows.push({ mat, base: 0.7, rate: 0.8 });
   }
 
   const secretNote = addPlate(
@@ -911,8 +1128,8 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
     1.7,
     signTexture(
       'secret-note',
-      ['I CUT THE WALL', 'MYSELF', '', 'ONE ROUND IS ALL', 'THEY ISSUED', '', 'AIM AT THE CHEST', 'AND DO NOT RUN'],
-      { bg: PAL.bone, fg: PAL.blood, plate: 'paper', width: 256, height: 256, size: 18 },
+      ['I CUT THE WALL', 'MYSELF', '', 'THE SEAL IS NOT', 'A TRAP', '', 'IT IS A GRAVE', 'WAITING FOR A', 'HEADSTONE'],
+      { bg: PAL.bone, fg: PAL.blood, plate: 'paper', width: 256, height: 256, size: 17 },
     ),
   );
   readables.push({
@@ -920,14 +1137,17 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
     title: 'PINNED TO THE WALL, IN PENCIL',
     body: [
       'I cut this wall open myself and I will cut it open again if they',
-      'seal it. The containment people left one weapon on site and one',
-      'round in it. One. I asked twice.',
+      'seal it. What is on the floor in here is not a trap and it is not',
+      'a summoning. I checked it against three books. It is a grave.',
       '',
-      'If you have to use it: stand still, let it come, put the round in',
-      'the chest. You will not get a second.',
+      'A grave does nothing on its own. It wants a headstone - something',
+      'consecrated, set down inside the lines, given freely.',
       '',
-      'If you miss, you have thirty seconds of it being angry and then',
-      'it goes back to hunting. Run the loops. It cannot see corners.',
+      'Put something holy in the seal and whatever the blue stone let out',
+      'goes into the floor with it, and stays there.',
+      '',
+      'I do not own anything holy. Harding in records did. He kept it in',
+      'that box of his and he never let anyone near the key.',
     ],
     pos: secretNote.pos,
     normal: secretNote.normal,
@@ -1078,11 +1298,19 @@ export function buildProps(psx: PsxRenderer, wb: WorldBuild, run: RunState): Pro
     breakerAnchor: { pos: breakerFace.pos, normal: breakerFace.normal },
     lockAnchor: { pos: lockPlate.pos, normal: lockPlate.normal },
     diamondAnchor: { pos: new THREE.Vector3(pedX, DAIS.height + 1.2, pedZ), normal: new THREE.Vector3(0, 0, 1) },
-    gunAnchor: { pos: new THREE.Vector3(cx(21), 0.6, cz(6) + 0.6), normal: null },
     diamondMesh,
-    gunMesh,
-    footlockerLid,
-    footlockerAnchor: { pos: new THREE.Vector3(cx(21), 0.8, cz(6) + 0.6) },
+    flareGunMesh,
+    flareGunAnchor: { pos: new THREE.Vector3(cx(27), 1.18, lz(39) + 0.02) },
+    flarePickups,
+    personalBoxLid,
+    personalBoxAnchor: { pos: new THREE.Vector3(cx(19), 2.1, cz(44) + 0.2) },
+    crossMesh,
+    crossAnchor: { pos: new THREE.Vector3(cx(19), 1.95, cz(44)) },
+    boxKeyMesh,
+    boxKeyAnchor: { pos: new THREE.Vector3(cx(5), 1.68, cz(8)) },
+    pentagram,
+    pentagramAnchor: { pos: new THREE.Vector3(cx(20), 0.6, cz(6)) },
+    placedCross,
     safeDoor,
     breakerDoor,
     doorLeaves,

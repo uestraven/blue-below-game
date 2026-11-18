@@ -212,6 +212,15 @@ export class Grid {
     let nx = x;
     let nz = z;
     let hit = false;
+
+    // If the body has somehow ended up overlapping geometry - squeezed into a
+    // corner, or caught by a blocker that changed under it - push it out
+    // before trying to move, or it can never move again.
+    if (this.discBlocked(nx, nz, r)) {
+      const unstuck = this.pushOut(nx, nz, r);
+      nx = unstuck.x;
+      nz = unstuck.z;
+    }
     const steps = Math.max(1, Math.ceil((Math.abs(dx) + Math.abs(dz)) / (r * 0.5)));
     const sx = dx / steps;
     const sz = dz / steps;
@@ -222,6 +231,20 @@ export class Grid {
       else hit = true;
     }
     return { x: nx, z: nz, hit };
+  }
+
+  /** Nearest unblocked spot to (x, z), searched outward in a ring. */
+  pushOut(x: number, z: number, r: number): { x: number; z: number } {
+    for (let step = 1; step <= 8; step++) {
+      const d = step * r * 0.5;
+      for (let a = 0; a < 8; a++) {
+        const ang = (a / 8) * Math.PI * 2;
+        const px = x + Math.cos(ang) * d;
+        const pz = z + Math.sin(ang) * d;
+        if (!this.discBlocked(px, pz, r)) return { x: px, z: pz };
+      }
+    }
+    return { x, z };
   }
 
   // ----------------------------------------------------------- line of sight
@@ -289,12 +312,23 @@ export class Grid {
   }
 
   /**
-   * As `walkClear`, but furniture counts. Used when smoothing a path, so a
-   * string-pulled straight line never cuts through a workbench that A* itself
-   * routed around.
+   * As `walkClear`, but furniture counts, and the false wall counts too. Used
+   * when smoothing a path.
+   *
+   * The false wall is deliberately walkable, which means a naive smoother will
+   * happily straighten a corridor route into a diagonal that clips through it
+   * and dumps the body in a dead-end room it never meant to enter. Smoothing
+   * therefore treats it as solid: A* can still step onto it on purpose, but no
+   * straight-line shortcut is ever drawn through it.
    */
   navClear(x0: number, z0: number, x1: number, z1: number): boolean {
-    return this.march(x0, z0, x1, z1, (gx, gz) => this.isBlockedForNav(gx, gz)).clear;
+    return this.march(
+      x0,
+      z0,
+      x1,
+      z1,
+      (gx, gz) => this.isBlockedForNav(gx, gz) || this.cellAt(gx, gz) === CELL_FALSE_WALL,
+    ).clear;
   }
 
   /** Distance along the ray until the first opaque cell, or `max`. */

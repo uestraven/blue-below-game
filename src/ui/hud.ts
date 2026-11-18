@@ -127,7 +127,21 @@ export class Hud {
    * `level` 0..1 is how strong the cue is; `angle` is the bearing to the demon
    * relative to where the player is looking, in radians (0 = dead ahead).
    */
+  /** Overrides the threat line, e.g. while the demon is burned off the board. */
+  setThreatText(text: string | null): void {
+    this.threatOverride = text;
+    if (text) {
+      this.threat.textContent = text;
+      this.threat.className = 'hud-threat on burning';
+    } else {
+      this.threat.textContent = 'SOMETHING IS CLOSE';
+    }
+  }
+
+  private threatOverride: string | null = null;
+
   setThreat(level: number, angle: number | null): void {
+    if (this.threatOverride) return;
     this.threat.className = level > 0.55 ? 'hud-threat on' : 'hud-threat';
     if (level <= 0.02 || angle === null) {
       this.dir.style.opacity = '0';

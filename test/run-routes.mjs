@@ -111,6 +111,10 @@ async function main() {
     ['12', 'Real keyboard input drives the game, not just the debug table', route12],
     ['13', 'Hiding: invisible to the demon, and not a suspension', route13],
     ['14', 'Chase balance: reacting and moving away is enough to escape', route14],
+    ['15', 'Flares: four shots, spent correctly, and they light the place', route15],
+    ['16', 'Flare hit: 60 active seconds, paused by panels, Bad Ending while absent', route16],
+    ['17', 'Two keys, two locks, and the cross collected exactly once', route17],
+    ['18', 'The ritual kills permanently from every demon state', route18],
   ];
 
   for (const [num, title, fn] of routes) {
@@ -221,6 +225,42 @@ async function startRun(api, seed) {
   await api.step(1 / 60, 4);
 }
 
+/** Collect the brass key, open the personal box and take the cross. */
+async function collectCross(api, speed = 4.3) {
+  await walkToAndUse(api, 'box-key', { speed });
+  check('brass key collected', (await api.call('ritualState')).hasBoxKey);
+  await walkToAndUse(api, 'personal-box', { speed });
+  check('personal box unlocked with the brass key', (await api.call('ritualState')).boxOpen);
+  await walkToAndUse(api, 'cross', { speed });
+  check('crucifix collected', (await api.call('ritualState')).hasCross);
+}
+
+/** Walk through the false wall and place the cross in the seal. */
+async function performRitual(api, speed = 4.3) {
+  await walkToAndUse(api, 'pentagram', { speed, use: false });
+  await api.call('use', 'pentagram');
+  eq('the seal offers the ritual', await api.call('screenId'), 'ritual-decision');
+  await api.call('pick', 'PLACE THE CROSS');
+  await api.step(1 / 60, 20);
+  check('cross placed and consumed', (await api.call('ritualState')).crossPlaced);
+  check('cross no longer in inventory', !(await api.call('ritualState')).hasCross);
+  // Let the protected ritual window play out.
+  await api.step(1 / 60, 300);
+}
+
+/** Collect the signal pistol and all three loose flares. */
+async function collectAllFlares(api, speed = 4.3) {
+  await walkToAndUse(api, 'flare-gun', { speed });
+  let f = await api.call('flareState');
+  check('signal pistol found loaded with one flare', f.hasGun && f.flares === 1, JSON.stringify(f));
+  for (const id of ['flare-corrA2', 'flare-generator', 'flare-sump']) {
+    await walkToAndUse(api, id, { speed });
+  }
+  f = await api.call('flareState');
+  check('all four flares in hand', f.flares === 4, `${f.flares} flares, taken ${f.taken.join(',')}`);
+  return f;
+}
+
 /** Walk to the vault, read the note and open the decision screen. */
 async function goToDiamond(api, speed = 4.3) {
   const d = await findInteractable(api, 'diamond');
@@ -233,6 +273,13 @@ async function goToDiamond(api, speed = 4.3) {
 /** The cell that stages the first demon sighting, and the far end of it. */
 const REVEAL_TRIGGER = { x: -49.5, z: -67.5 }; // cell (15, 3), east end of tunnel E
 const REVEAL_AFTER = { x: -66.0, z: -64.5 }; // cell (10, 4), at the escape branch
+
+/** As walkUntilReveal, but without asserting the demon is still standing. */
+async function walkUntilRevealLoose(api) {
+  const arrived = await api.call('walkTo', REVEAL_TRIGGER.x, REVEAL_TRIGGER.z, 18000, 4.3);
+  check('walked the return route back into the tunnels', arrived);
+  check('reveal fired', (await api.snap()).progress.revealPlayed);
+}
 
 /** Walk the return route until the reveal fires, then assert its staging. */
 async function walkUntilReveal(api) {
@@ -380,7 +427,7 @@ async function route2(api, page) {
   check('key not auto-collected', !s.progress.hasKey);
   await api.call('forceDemonTo', 53, 10);
   await walkToAndUse(api, 'cabinet-key', { speed: 6.6 });
-  check('key collected from inside the safe', (await api.snap()).progress.hasKey);
+  check('key collected from inside the safe', (await api.snap()).progress.hasCabinetKey);
   await api.shot(page, 'route2-safe-open');
 
   // Puzzle 2: breaker sequence.
@@ -414,43 +461,42 @@ async function route2(api, page) {
 async function route3(api, page) {
   await startRun(api, 3003);
 
-  // The secret room is entered by walking through the wall.
-  // The gun is inside the footlocker now, so the locker is what we walk to.
-  const locker = await findInteractable(api, 'footlocker');
-  const stand = await api.call('approachPoint', locker.x, locker.z);
-  const arrived = await api.call('walkTo', stand.x, stand.z, 16000, 4.3);
+  // The seal is examinable long before anything can be done with it.
+  const pent = await findInteractable(api, 'pentagram');
+  const pentStand = await api.call('approachPoint', pent.x, pent.z);
+  const arrived = await api.call('walkTo', pentStand.x, pentStand.z, 16000, 4.3);
   check('walked through the false wall into the sealed store', arrived);
-  eq('standing in the secret region', await api.call('regionAt', locker.x, locker.z), 'secret');
+  eq('standing in the secret region', await api.call('regionAt', pent.x, pent.z), 'secret');
   check('false wall discovery recorded', (await api.snap()).progress.secretFound);
-  await api.shot(page, 'route3-secret-room');
-  await api.call('face', locker.x, locker.z);
-  // The gun is not lying in the open any more: the footlocker has to be forced
-  // before it is even visible.
-  check('the gun is not offered before the footlocker is opened', !(await api.call('interactables')).some((i) => i.id === 'gun'));
-  await api.call('use', 'footlocker');
-  check('footlocker forced', (await api.snap()).progress.footlockerOpen);
-  check('only now is the gun there to take', (await api.call('interactables')).some((i) => i.id === 'gun'));
-  await api.call('use', 'gun');
-  const s0 = await api.snap();
-  check('gun taken with one round', s0.progress.hasGun && !s0.progress.roundSpent);
+  await api.shot(page, 'route3-pentagram');
+  await api.call('face', pent.x, pent.z);
+  await api.call('use', 'pentagram');
+  eq('without the cross the seal is only readable', (await api.snap()).phase, 'reading');
+  check('inspection recorded', (await api.call('ritualState')).pentagramInspected);
+  await api.call('pick', 'PUT IT DOWN');
+
+  // The whole chain: brass key -> box -> cross.
+  await collectCross(api);
 
   await goToDiamond(api);
   await api.call('use', 'diamond');
   await api.call('pick', 'LOOK AT THE STONE');
   await api.call('pick', 'TAKE THE DIAMOND');
-  check('checkpoint includes the gun picked up earlier', (await api.snap()).checkpoint.hasGun);
+  check('checkpoint includes the cross picked up earlier', (await api.snap()).checkpoint.hasCross);
 
   await walkUntilReveal(api);
   let s = await api.snap();
+  check('demon revealed and hunting', s.progress.revealPlayed);
 
-  // Stand still, let it come, put the round in the chest.
-  await api.call('aimAtDemon');
-  await api.shot(page, 'route3-aiming');
-  await api.call('fire');
+  // Back to the seal with it on the board, and finish the ritual.
+  await performRitual(api, 6.6);
   s = await api.snap();
-  check('round spent', s.progress.roundSpent);
-  check('confirmed hit killed the demon', !s.demon.alive, `demon=${s.demon.state}`);
-  await api.step(1 / 60, 200);
+  const r = await api.call('ritualState');
+  check('the ritual permanently killed the demon', r.ritualDone && r.permanentlyDead, JSON.stringify(r));
+  check('demon is dead, not merely absent', !s.demon.alive && !r.suppressed, `alive=${s.demon.alive}`);
+  check('no pending return timer', r.absence === 0);
+  await api.shot(page, 'route3-ritual-done');
+  await api.step(1 / 60, 240);
   check('demon stays dead', !(await api.snap()).demon.alive);
 
   // All three puzzles still have to be solved.
@@ -462,7 +508,7 @@ async function route3(api, page) {
   await walkToAndUse(api, 'door-panel');
   await solveLock(api);
   s = await api.snap();
-  check('all three puzzles solved with the demon already dead', s.progress.safeOpen && s.progress.powerRestored && s.progress.doorUnlocked);
+  check('all three puzzles solved after the ritual', s.progress.safeOpen && s.progress.powerRestored && s.progress.doorUnlocked);
 
   await crossThreshold(api, 4.3);
   s = await api.snap();
@@ -478,12 +524,7 @@ async function route3(api, page) {
 async function route4(api, page) {
   await startRun(api, 4004);
 
-  const locker4 = await findInteractable(api, 'footlocker');
-  const gunStand = await api.call('approachPoint', locker4.x, locker4.z);
-  check('walked through the false wall to the gun', await api.call('walkTo', gunStand.x, gunStand.z, 16000, 4.3));
-  await api.call('face', locker4.x, locker4.z);
-  await api.call('use', 'footlocker');
-  await api.call('use', 'gun');
+  await collectAllFlares(api);
 
   await goToDiamond(api);
   await api.call('use', 'diamond');
@@ -491,16 +532,17 @@ async function route4(api, page) {
   await api.call('pick', 'TAKE THE DIAMOND');
   await walkUntilReveal(api);
 
+  // Fire away from it: the flare is spent, it lights the corridor, and the
+  // demon is untouched.
   await api.call('aimAway');
   await api.call('fire');
+  await api.step(1 / 60, 60);
+  let f = await api.call('flareState');
   let s = await api.snap();
-  check('round spent on the miss', s.progress.roundSpent);
+  check('a flare was spent on the miss', f.flares === 3 && f.fired === 1, JSON.stringify(f));
+  check('the missed flare is burning on the floor', f.burning >= 1, `${f.burning} burning`);
   check('demon survives a miss', s.demon.alive, `demon=${s.demon.state}`);
-
-  // Firing again does nothing but tell you it is empty.
-  await api.call('fire');
-  s = await api.snap();
-  check('still exactly one round spent, weapon now empty', s.progress.roundSpent && s.demon.alive);
+  check('a miss does not suppress it', !(await api.call('ritualState')).suppressed);
 
   await api.call('forceDemonTo', 53, 10);
   await walkToAndUse(api, 'safe', { speed: 6.6 });
@@ -517,6 +559,7 @@ async function route4(api, page) {
   s = await api.snap();
   eq('ending is bad after a miss', s.ending, 'bad');
   check('demon alive at the threshold', s.demon.alive);
+  check('the ritual was never done', !(await api.call('ritualState')).ritualDone);
   await api.shot(page, 'route4-bad-after-miss');
 }
 
@@ -532,7 +575,11 @@ async function route5(api, page) {
   check('door panel present but not ready for a code', by('door-panel') && !by('door-panel').ready, by('door-panel')?.label);
   check('safe present but not ready', by('safe') && !by('safe').ready, by('safe')?.label);
   check('breaker present but not ready', by('breaker') && !by('breaker').ready, by('breaker')?.label);
-  check('breaker label says it is locked', (by('breaker')?.label || '').toLowerCase().includes('lock'), by('breaker')?.label);
+  check(
+    'the breaker cabinet names the key it wants',
+    /steel key/i.test(by('breaker')?.label || ''),
+    by('breaker')?.label,
+  );
   check('key is not offered before the safe is open', !by('cabinet-key'));
 
   await api.call('use', 'safe');
@@ -915,6 +962,7 @@ async function route9(api) {
   const legs = [
     ['start -> front door', cell(38, 41), at('door-panel')],
     ['front door -> records memo', at('door-panel'), at('read:memo')],
+    ['records -> the signal pistol', at('read:memo'), at('flare-gun')],
     ['records -> corridor A -> clue IV', at('read:memo'), at('clue:IV')],
     ['clue IV -> maintenance diagram', at('clue:IV'), at('read:diagram')],
     ['diagram -> workshop clue III', at('read:diagram'), at('clue:III')],
@@ -922,8 +970,10 @@ async function route9(api) {
     ['tunnels -> clue I (pump chamber)', cell(13, 11), at('clue:I')],
     ['clue I -> clue II (collapsed shelving)', at('clue:I'), at('clue:II')],
     ['clue II -> the false wall', at('clue:II'), cell(17, 6)],
-    ['false wall -> the footlocker', cell(17, 6), at('footlocker')],
-    ['footlocker -> the vault', at('footlocker'), at('diamond')],
+    ['false wall -> the seal', cell(17, 6), at('pentagram')],
+    ['records -> the brass key', at('read:memo'), at('box-key')],
+    ['brass key -> the personal box', at('box-key'), at('personal-box')],
+    ['the seal -> the vault', at('pentagram'), at('diamond')],
     ['vault -> reveal corridor', at('diamond'), cell(15, 3)],
     ['reveal -> counter safe', cell(15, 3), at('safe')],
     ['safe -> breaker cabinet', at('safe'), at('breaker')],
@@ -958,15 +1008,16 @@ const STATIC_TEXTURE_KEYS = [
   'surf.wall.concrete', 'surf.wall.painted', 'surf.wall.tile', 'surf.wall.rust', 'surf.wall.seam',
   'surf.wall.vault', 'surf.ceil.panel', 'surf.ceil.concrete', 'surf.metal.dark', 'surf.metal.machine',
   'surf.prop.crate', 'surf.prop.locker', 'surf.prop.desk', 'surf.prop.pipe',
-  'surf.demon.skin', 'surf.demon.face', 'surf.prop.gunmetal', 'surf.prop.gungrip',
-  'decal.scratch', 'face.safe', 'face.breaker', 'face.lock',
+  'surf.demon.skin', 'surf.demon.face', 'surf.prop.gungrip',
+  'surf.prop.flarebody', 'surf.prop.flareshell',
+  'decal.scratch', 'decal.pentagram', 'face.safe', 'face.breaker', 'face.lock',
 ];
 
 async function route10(api) {
   await startRun(api, 10010);
   // Touch the states that swap or reveal textures so the audit sees them all.
   await api.call('openFrontDoor');
-  await api.call('use', 'gun');
+  await api.call('use', 'flare-gun');
   await api.call('playReveal');
   await api.step(1 / 60, 4);
 
@@ -1370,6 +1421,354 @@ async function route14(api) {
   }
   check('a player who does NOT react gets caught', caught, 'stood still next to a chasing demon');
   if (caught) await api.call('pick', 'RETRY FROM THE VAULT');
+}
+
+// =====================================================================
+// ROUTE 15 - flare gun, ammunition and illumination
+// =====================================================================
+async function route15(api, page) {
+  await startRun(api, 15015);
+
+  // Flares are useless before the pistol, and say so.
+  let f = await api.call('flareState');
+  check('no pistol and no flares at the start', !f.hasGun && f.flares === 0);
+  await walkToAndUse(api, 'flare-corrA2');
+  f = await api.call('flareState');
+  check('a loose flare can be collected before the pistol', f.flares === 1 && !f.hasGun);
+  await api.call('fire');
+  f = await api.call('flareState');
+  check('firing does nothing without the pistol', f.fired === 0 && f.flares === 1);
+
+  await walkToAndUse(api, 'flare-gun');
+  f = await api.call('flareState');
+  check('the pistol comes loaded, for two in hand', f.hasGun && f.flares === 2, JSON.stringify(f));
+
+  for (const id of ['flare-generator', 'flare-sump']) await walkToAndUse(api, id, { speed: 4.3 });
+  f = await api.call('flareState');
+  check('four flares total per run', f.flares === 4, `${f.flares}`);
+
+  // Picking a collected flare up twice must not duplicate ammunition.
+  check('a collected flare is gone from the world', !(await api.call('interactables')).some((i) => i.id === 'flare-sump'));
+  await api.call('use', 'flare-sump');
+  check('re-using a taken flare adds nothing', (await api.call('flareState')).flares === 4);
+
+  // --- illumination -----------------------------------------------------
+  // Stand in the darkest part of the maze and measure the light before and
+  // after putting a flare on the floor.
+  await api.call('teleportCell', 8, 11);
+  await api.call('face', -96, -46.5);
+  await api.step(1 / 60, 10);
+  const here = [(8.5 - 32) * 3, 1.0, (11.5 - 26) * 3];
+  const ambientHere = await api.call('lightAt', here[0], here[1], here[2], false);
+  await api.shot(page, 'route15-dark-before');
+  check('this corridor is dark enough for a flare to be worth a cartridge', ambientHere.sum < 0.5, `ambient ${ambientHere.sum.toFixed(3)}`);
+  check('but not so dark it cannot be navigated', ambientHere.sum > 0.02, `ambient ${ambientHere.sum.toFixed(3)}`);
+
+  await api.call('fire');
+  await api.step(1 / 60, 90);
+  const where = await api.call('flarePositions');
+  check('the fired flare is somewhere in the world, burning', where.length === 1, JSON.stringify(where));
+  // Compare the same point lit and unlit: the flare travels, so measure where
+  // it actually came to rest rather than where it was fired from.
+  const at = where[0];
+  const unlit = await api.call('lightAt', at.x, at.y + 1.2, at.z, false);
+  const lit = await api.call('lightAt', at.x, at.y + 1.2, at.z, true);
+  const litHere = await api.call('lightAt', here[0], here[1], here[2], true);
+  await api.shot(page, 'route15-flare-lit');
+  out(
+    `    note  at the flare: ${unlit.sum.toFixed(3)} unlit -> ${lit.sum.toFixed(3)} lit; ` +
+      `back at the player ${ambientHere.sum.toFixed(3)} -> ${litHere.sum.toFixed(3)}`,
+  );
+  check('the flare floods the area it lands in', lit.sum > unlit.sum * 3, `${unlit.sum.toFixed(3)} -> ${lit.sum.toFixed(3)}`);
+  check('and the player can see further down the corridor for it', litHere.sum > ambientHere.sum * 1.2, `${ambientHere.sum.toFixed(3)} -> ${litHere.sum.toFixed(3)}`);
+
+  // --- spend the rest and run dry ---------------------------------------
+  f = await api.call('flareState');
+  check('firing consumed one', f.flares === 3 && f.fired === 1, JSON.stringify(f));
+  for (let i = 0; i < 3; i++) {
+    await api.call('fire');
+    await api.step(1 / 60, 30);
+  }
+  f = await api.call('flareState');
+  check('all four can be spent', f.flares === 0 && f.fired === 4, JSON.stringify(f));
+  await api.call('fire');
+  f = await api.call('flareState');
+  check('an empty pistol fires nothing', f.fired === 4 && f.flares === 0);
+  check('simultaneous burning flares are capped at the shader slot count', f.active <= 3, `${f.active} active`);
+}
+
+// =====================================================================
+// ROUTE 16 - a flare in the demon: 60 ACTIVE seconds
+// =====================================================================
+async function route16(api, page) {
+  await startRun(api, 16016);
+  await collectAllFlares(api);
+  await goToDiamond(api);
+  await api.call('use', 'diamond');
+  await api.call('pick', 'LOOK AT THE STONE');
+  await api.call('pick', 'TAKE THE DIAMOND');
+  await walkUntilReveal(api);
+
+  // Put a flare in it.
+  await api.call('fireAtDemon');
+  let r = await api.call('ritualState');
+  let s = await api.snap();
+  check('the hit suppressed it', r.suppressed, JSON.stringify(r));
+  check('suppression starts at the full 60 seconds', Math.abs(r.absence - 60) < 2.5, `${r.absence.toFixed(2)}s`);
+  check('it is still ALIVE - a flare is not a kill', s.demon.alive);
+  check('the ritual is emphatically not done', !r.ritualDone);
+  await api.shot(page, 'route16-ignited');
+
+  // It burns, then leaves the board.
+  await api.step(1 / 60, 150);
+  s = await api.snap();
+  check('it leaves the board after burning', s.demon.state === 'absent' || s.demon.state === 'burning', s.demon.state);
+  await api.step(1 / 60, 120);
+  s = await api.snap();
+  eq('now absent', s.demon.state, 'absent');
+  check('an absent demon cannot catch the player', s.phase === 'play' && s.deaths === 0);
+
+  // --- the clock is ACTIVE gameplay seconds ----------------------------
+  const beforePanel = (await api.call('ritualState')).absence;
+  await api.call('forceDemonTo', 53, 10);
+  await walkToAndUse(api, 'safe', { speed: 6.6, use: false });
+  await api.call('use', 'safe');
+  eq('a device panel is open', await api.call('puzzleOpen'), 'safe');
+  // Measured strictly from inside the panel: the frames spent transitioning
+  // into it are ordinary gameplay and legitimately spend the clock.
+  const beforeOpen = (await api.call('ritualState')).absence;
+  await api.step(1 / 60, 600); // ten simulated seconds behind the panel
+  const afterOpen = (await api.call('ritualState')).absence;
+  check(
+    'a puzzle interaction PAUSES the return clock',
+    Math.abs(afterOpen - beforeOpen) < 0.001,
+    `${beforeOpen.toFixed(2)} -> ${afterOpen.toFixed(2)} over 10 simulated seconds`,
+  );
+  await api.call('closePuzzle');
+
+  // And the pause screen stops it too.
+  const beforePause = (await api.call('ritualState')).absence;
+  await api.call('blurWindow');
+  await api.step(1 / 60, 2);
+  eq('paused', (await api.snap()).phase, 'menu');
+  await api.step(1 / 60, 600);
+  const afterPause = (await api.call('ritualState')).absence;
+  check(
+    'pausing the game PAUSES the return clock',
+    Math.abs(afterPause - beforePause) < 0.001,
+    `${beforePause.toFixed(2)} -> ${afterPause.toFixed(2)}`,
+  );
+  await api.call('pick', 'RESUME');
+  await api.step(1 / 60, 120);
+  check('but ordinary play DOES spend the clock', (await api.call('ritualState')).absence < beforePause - 1.5,
+    `${beforePause.toFixed(2)} -> ${(await api.call('ritualState')).absence.toFixed(2)} after 2 simulated seconds of play`);
+  void beforePanel;
+
+  // --- it comes back, away from the player and out of sight -------------
+  await api.call('teleportCell', 13, 11);
+  await api.step(1 / 60, 10);
+  let returned = false;
+  let returnDist = 0;
+  let returnVisible = true;
+  for (let i = 0; i < 300; i++) {
+    await api.step(1 / 60, 30);
+    const cur = await api.snap();
+    if (cur.phase !== 'play') break;
+    if (cur.demon.state !== 'absent') {
+      returned = true;
+      returnDist = cur.demon.distance;
+      returnVisible = await api.call('pathExists', cur.player.x, cur.player.z, cur.demon.x, cur.demon.z);
+      returnVisible = await api.call('sightClear', cur.player.x, cur.player.z, cur.demon.x, cur.demon.z);
+      break;
+    }
+  }
+  check('it comes back when the clock runs out', returned);
+  check('it returns away from the player', returnDist > 15, `${returnDist.toFixed(1)} units`);
+  check('it returns out of the player view', !returnVisible, returnVisible ? 'had line of sight' : 'no line of sight');
+  r = await api.call('ritualState');
+  check('the suppression clock is cleared on return', r.absence === 0 && !r.suppressed);
+  check('and it is hunting again', (await api.snap()).demon.state !== 'dormant');
+
+  // --- escaping while merely absent is still the Bad Ending -------------
+  // Bring it into range first: a shot at a demon a hundred units away down a
+  // blind corridor is correctly not a hit.
+  // Both in the long north tunnel, with clear line of sight between them.
+  await api.call('teleportCell', 14, 4);
+  await api.call('forceDemonTo', 8, 4);
+  await api.call('face', (8.5 - 32) * 3, (4.5 - 26) * 3);
+  await api.step(1 / 60, 10);
+  const pre = await api.snap();
+  check('demon is in range and in view for the second shot', pre.demon.distance < 25, `${pre.demon.distance.toFixed(1)} units`);
+  await api.call('fireAtDemon');
+  r = await api.call('ritualState');
+  check('suppressed again by the second flare', r.suppressed, `${r.absence.toFixed(1)}s`);
+  await api.step(1 / 60, 240);
+  eq('absent again', (await api.snap()).demon.state, 'absent');
+
+  await walkToAndUse(api, 'safe', { speed: 6.6 });
+  await solveSafe(api);
+  await walkToAndUse(api, 'cabinet-key', { speed: 6.6 });
+  await walkToAndUse(api, 'breaker', { speed: 6.6 });
+  await solveBreaker(api);
+  await walkToAndUse(api, 'door-panel', { speed: 6.6 });
+  await solveLock(api);
+  r = await api.call('ritualState');
+  check('still suppressed, not dead, at the threshold', r.suppressed && !r.ritualDone, JSON.stringify(r));
+  await crossThreshold(api);
+  s = await api.snap();
+  eq('escaping while it is merely absent is the BAD ending', s.ending, 'bad');
+  await api.shot(page, 'route16-bad-while-absent');
+}
+
+// =====================================================================
+// ROUTE 17 - two keys, two locks, one cross
+// =====================================================================
+async function route17(api, page) {
+  await startRun(api, 17017);
+
+  // The box is discoverable before its key, and says what it needs.
+  const list = await api.call('interactables');
+  const box = list.find((i) => i.id === 'personal-box');
+  check('the personal box exists from the start', !!box);
+  check('and reports itself locked', !box.ready && /lock/i.test(box.label), box.label);
+  await walkToAndUse(api, 'personal-box');
+  eq('inspecting it without the key gives a readable', (await api.snap()).phase, 'reading');
+  await api.shot(page, 'route17-box-locked');
+  await api.call('pick', 'PUT IT DOWN');
+  let r = await api.call('ritualState');
+  check('it did not open', !r.boxOpen);
+  check('the cross is not offered yet', !(await api.call('interactables')).some((i) => i.id === 'cross'));
+
+  // The steel key does not open the box, and the brass key does not open
+  // the cabinet. Prove both directions.
+  await walkToAndUse(api, 'box-key');
+  r = await api.call('ritualState');
+  check('brass key collected', r.hasBoxKey);
+  await walkToAndUse(api, 'breaker', { speed: 4.3, use: false });
+  await api.call('use', 'breaker');
+  eq('the brass key does not open the breaker cabinet', await api.call('puzzleOpen'), null);
+  const brLabel = (await api.call('interactables')).find((i) => i.id === 'breaker').label;
+  check('the breaker cabinet asks for the steel key by name', /steel/i.test(brLabel), brLabel);
+
+  await walkToAndUse(api, 'personal-box');
+  r = await api.call('ritualState');
+  check('the brass key DOES open the personal box', r.boxOpen);
+  check('the cross is now available', (await api.call('interactables')).some((i) => i.id === 'cross'));
+
+  await walkToAndUse(api, 'cross');
+  r = await api.call('ritualState');
+  check('cross collected', r.hasCross);
+  check('the cross is gone from the world', !(await api.call('interactables')).some((i) => i.id === 'cross'));
+  await api.call('use', 'cross');
+  check('it cannot be collected twice', (await api.call('ritualState')).hasCross);
+
+  // Now the other key, and its own lock.
+  await goToDiamond(api);
+  await api.call('use', 'diamond');
+  await api.call('pick', 'LOOK AT THE STONE');
+  await api.call('pick', 'TAKE THE DIAMOND');
+  await walkUntilReveal(api);
+  await api.call('forceDemonTo', 53, 10);
+  await walkToAndUse(api, 'safe', { speed: 6.6 });
+  await solveSafe(api);
+  await api.call('forceDemonTo', 53, 10);
+  await walkToAndUse(api, 'cabinet-key', { speed: 6.6 });
+  const s = await api.snap();
+  check('steel cabinet key collected, distinct from the brass one', s.progress.hasCabinetKey && s.progress.hasBoxKey);
+  await api.call('forceDemonTo', 53, 10);
+  await walkToAndUse(api, 'breaker', { speed: 6.6 });
+  eq('the steel key opens the breaker cabinet', await api.call('puzzleOpen'), 'breaker');
+  await api.call('closePuzzle');
+
+  // Both survive a checkpoint restore.
+  check('both keys and the cross are in the checkpoint', (await api.snap()).checkpoint.hasBoxKey && (await api.snap()).checkpoint.hasCross);
+}
+
+// =====================================================================
+// ROUTE 18 - the ritual, from every demon state
+// =====================================================================
+async function route18(api, page) {
+  // --- a: while it is hunting (covered in route 3) and while suspended ---
+  await startRun(api, 18018);
+  await collectCross(api);
+  await goToDiamond(api);
+  await api.call('use', 'diamond');
+  await api.call('pick', 'LOOK AT THE STONE');
+  await api.call('pick', 'TAKE THE DIAMOND');
+  await walkUntilReveal(api);
+  await api.step(1 / 60, 240);
+
+  // Suspended behind a device panel, then place the cross.
+  await api.call('forceDemonTo', 20, 6);
+  await walkToAndUse(api, 'pentagram', { speed: 6.6, use: false });
+  await api.call('forceDemonTo', 16, 8);
+  await api.step(1 / 60, 10);
+  let s = await api.snap();
+  check('demon on the board before the ritual', s.demon.state !== 'dormant' && s.demon.alive, s.demon.state);
+  await performRitual(api, 6.6);
+  let r = await api.call('ritualState');
+  check('ritual from a live hunt kills permanently', r.ritualDone && r.permanentlyDead, JSON.stringify(r));
+  check('exactly one death, not repeated', !(await api.snap()).demon.alive);
+  // Re-using the seal does nothing.
+  await api.call('use', 'pentagram');
+  check('the seal cannot be used twice', (await api.call('ritualState')).ritualDone);
+  await api.shot(page, 'route18-ritual-live');
+
+  // --- b: while it is absent after a flare hit -------------------------
+  await startRun(api, 18118);
+  await collectAllFlares(api);
+  await collectCross(api);
+  await goToDiamond(api);
+  await api.call('use', 'diamond');
+  await api.call('pick', 'LOOK AT THE STONE');
+  await api.call('pick', 'TAKE THE DIAMOND');
+  await walkUntilReveal(api);
+  await api.call('fireAtDemon');
+  await api.step(1 / 60, 240);
+  s = await api.snap();
+  eq('demon absent on a flare budget', s.demon.state, 'absent');
+  const absenceBefore = (await api.call('ritualState')).absence;
+  check('with time still on the clock', absenceBefore > 10, `${absenceBefore.toFixed(1)}s`);
+  await performRitual(api, 6.6);
+  r = await api.call('ritualState');
+  check('ritual works while it is absent', r.ritualDone && r.permanentlyDead, JSON.stringify(r));
+  check('the pending return is CANCELLED', r.absence === 0 && !r.suppressed, `absence=${r.absence}`);
+  await api.step(1 / 60, 600); // well past when it would have returned
+  s = await api.snap();
+  check('it never comes back', !s.demon.alive && s.demon.state === 'dead', s.demon.state);
+
+  // --- c: cross placed BEFORE the diamond is taken ---------------------
+  await startRun(api, 18218);
+  await collectCross(api);
+  await performRitual(api, 4.3);
+  r = await api.call('ritualState');
+  check('the cross can be placed before the diamond is taken', r.crossPlaced);
+  check('but the ritual has not resolved yet - nothing has been released', !r.ritualDone, JSON.stringify(r));
+  await api.shot(page, 'route18-seal-armed');
+
+  await goToDiamond(api);
+  await api.call('use', 'diamond');
+  await api.call('pick', 'LOOK AT THE STONE');
+  await api.call('pick', 'TAKE THE DIAMOND');
+  await walkUntilRevealLoose(api);
+  await api.step(1 / 60, 60);
+  r = await api.call('ritualState');
+  s = await api.snap();
+  check('taking the diamond stages the ritual at the reveal', r.ritualDone && r.permanentlyDead, JSON.stringify(r));
+  check('the demon is permanently dead, having been released into an armed seal', !s.demon.alive);
+
+  // And it still ends well only after the three puzzles and the threshold.
+  await walkToAndUse(api, 'safe', { speed: 4.3 });
+  await solveSafe(api);
+  await walkToAndUse(api, 'cabinet-key');
+  await walkToAndUse(api, 'breaker');
+  await solveBreaker(api);
+  await walkToAndUse(api, 'door-panel');
+  await solveLock(api);
+  await crossThreshold(api, 4.3);
+  s = await api.snap();
+  eq('cross-before-diamond still reaches the Good Ending', s.ending, 'good');
+  await api.shot(page, 'route18-good-from-armed-seal');
 }
 
 main().catch((e) => {

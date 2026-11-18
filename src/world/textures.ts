@@ -467,12 +467,33 @@ export const SURFACE = {
       grime(g, rng, 64, 64, PAL.ink, 3, 5);
     }),
 
-  gunMetal: (): THREE.Texture =>
-    make('surf.prop.gunmetal', 32, 32, (g, rng) => {
-      fill(g, PAL.slate, 32, 32);
-      speckle(g, rng, 32, 32, [PAL.ink, PAL.steel, PAL.grey], 0.4);
-      hline(g, 8, 32, PAL.grey);
-      hline(g, 23, 32, PAL.ink);
+  /** Signal-pistol body: blunt, scuffed, safety-orange rather than gunmetal. */
+  flareBody: (): THREE.Texture =>
+    make('surf.prop.flarebody', 32, 32, (g, rng) => {
+      // Blued steel with a safety-orange band, not a block of rust: at
+      // first-person scale a heavily speckled orange reads as a crate.
+      fill(g, PAL.steel, 32, 32);
+      speckle(g, rng, 32, 32, [PAL.slate, PAL.steel, PAL.grey], 0.3);
+      g.fillStyle = PAL.rustLit;
+      g.fillRect(0, 12, 32, 8);
+      g.fillStyle = PAL.amber;
+      g.fillRect(0, 13, 32, 2);
+      hline(g, 11, 32, PAL.ink);
+      hline(g, 20, 32, PAL.ink);
+      grime(g, rng, 32, 32, PAL.ink, 2, 3);
+    }),
+
+  /** A flare cartridge: paper shell with a stencilled band. */
+  flareShell: (): THREE.Texture =>
+    make('surf.prop.flareshell', 32, 32, (g, rng) => {
+      fill(g, PAL.blood, 32, 32);
+      speckle(g, rng, 32, 32, [PAL.bloodLit, PAL.blood], 0.3);
+      g.fillStyle = PAL.bone;
+      g.fillRect(0, 12, 32, 7);
+      g.fillStyle = PAL.ink;
+      g.fillRect(0, 12, 32, 1);
+      g.fillRect(0, 18, 32, 1);
+      for (let i = 0; i < 5; i++) g.fillRect(3 + i * 6, 14, 2, 3);
     }),
 
   gunGrip: (): THREE.Texture =>
@@ -893,6 +914,95 @@ export function glowTexture(color: string): THREE.Texture {
         }
       }
       g.globalAlpha = 1;
+    },
+    { repeat: false, mips: true },
+  );
+}
+
+/**
+ * The seal cut into the floor of the sealed store: a pentagram in a double
+ * ring, drawn with the stroke renderer so it stays crisp with jitter and warp
+ * switched off, on transparent so the floor shows through.
+ */
+export function pentagramTexture(): THREE.Texture {
+  return make(
+    'decal.pentagram',
+    128,
+    128,
+    (g, rng) => {
+      g.clearRect(0, 0, 128, 128);
+      const cx0 = 64;
+      const cy0 = 64;
+      const R = 54;
+
+      const ring = (r: number, w: number, color: string): void => {
+        g.strokeStyle = color;
+        g.lineWidth = w;
+        g.beginPath();
+        // Stepped circle: 24 segments, so it reads as scribed rather than CAD.
+        for (let i = 0; i <= 24; i++) {
+          const a = (i / 24) * Math.PI * 2;
+          const px = cx0 + Math.cos(a) * r;
+          const py = cy0 + Math.sin(a) * r;
+          if (i === 0) g.moveTo(px, py);
+          else g.lineTo(px, py);
+        }
+        g.stroke();
+      };
+
+      // Halo first, so the lines sit in light.
+      g.globalAlpha = 0.45;
+      ring(R, 11, PAL.blood);
+      g.globalAlpha = 1;
+
+      ring(R, 4, PAL.bloodLit);
+      ring(R - 7, 2, PAL.blood);
+
+      // The star: five points, every second vertex.
+      const pts: Array<[number, number]> = [];
+      for (let i = 0; i < 5; i++) {
+        const a = -Math.PI / 2 + (i / 5) * Math.PI * 2;
+        pts.push([cx0 + Math.cos(a) * (R - 10), cy0 + Math.sin(a) * (R - 10)]);
+      }
+      g.lineCap = 'round';
+      g.strokeStyle = PAL.blood;
+      g.lineWidth = 9;
+      g.globalAlpha = 0.5;
+      for (let i = 0; i < 5; i++) {
+        const a = pts[i];
+        const b = pts[(i + 2) % 5];
+        g.beginPath();
+        g.moveTo(a[0], a[1]);
+        g.lineTo(b[0], b[1]);
+        g.stroke();
+      }
+      g.globalAlpha = 1;
+      g.strokeStyle = PAL.bloodLit;
+      g.lineWidth = 3.5;
+      for (let i = 0; i < 5; i++) {
+        const a = pts[i];
+        const b = pts[(i + 2) % 5];
+        g.beginPath();
+        g.moveTo(a[0], a[1]);
+        g.lineTo(b[0], b[1]);
+        g.stroke();
+      }
+
+      // Scratched marks between the points.
+      g.strokeStyle = PAL.blood;
+      g.lineWidth = 1.5;
+      for (let i = 0; i < 5; i++) {
+        const a = -Math.PI / 2 + ((i + 0.5) / 5) * Math.PI * 2;
+        const r0 = R - 4;
+        g.beginPath();
+        g.moveTo(cx0 + Math.cos(a) * r0, cy0 + Math.sin(a) * r0);
+        g.lineTo(cx0 + Math.cos(a) * (r0 - 7), cy0 + Math.sin(a) * (r0 - 7));
+        g.stroke();
+      }
+      for (let i = 0; i < 40; i++) {
+        g.fillStyle = rng.next() > 0.5 ? PAL.blood : PAL.bloodLit;
+        g.fillRect(cx0 - R + rng.int(R * 2), cy0 - R + rng.int(R * 2), 1, 1);
+      }
     },
     { repeat: false, mips: true },
   );

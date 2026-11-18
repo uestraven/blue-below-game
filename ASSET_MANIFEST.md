@@ -77,7 +77,9 @@ cache key, which is also the three.js `Texture.name` in the running build.
 | `surf.prop.locker` | 64² | Locker banks, filing cabinets, shelving | AUTHORED-BY-ENGINE |
 | `surf.prop.desk` | 64² | Benches, desks, counters, lectern | AUTHORED-BY-ENGINE |
 | `surf.prop.pipe` | 32² | Pipes, conduit, stacks (shaded cylinder strip) | AUTHORED-BY-ENGINE |
-| `surf.prop.gunmetal`, `surf.prop.gungrip` | 32² | The gun, world and first-person | AUTHORED-BY-ENGINE |
+| `surf.prop.gungrip` | 32² | Pistol grip, world and first-person | AUTHORED-BY-ENGINE |
+| `surf.prop.flarebody` | 32² | Signal pistol body: blued steel with a safety-orange band. Deliberately not a block of orange — at first-person scale a heavily speckled orange reads as a crate | AUTHORED-BY-ENGINE |
+| `surf.prop.flareshell` | 32² | Flare cartridge: paper shell with a stencilled band | AUTHORED-BY-ENGINE |
 
 Demon textures, both 64², both AUTHORED-BY-ENGINE:
 
@@ -92,6 +94,7 @@ Demon textures, both 64², both AUTHORED-BY-ENGINE:
 |---|---|---|---|
 | `decal.blood.<numeral>.<letter>` | 128×256 | **Individual per-letter decals**, so the engine composes each run's four clues dynamically. Letter on top, Roman numeral below a separator bar, paint halo and drips. Alpha-tested at 0.45. Rendered with jitter and affine warp **off**. | AUTHORED-BY-ENGINE |
 | `decal.scratch` | 64² | Tally marks + blood slash beside the false-wall seam | AUTHORED-BY-ENGINE |
+| `decal.pentagram` | 128² | The seal cut into the floor of the sealed store: a pentagram in a double ring, drawn with the stroke renderer on transparent so the floor shows through, alpha-tested, emissive, with jitter and warp off | AUTHORED-BY-ENGINE |
 
 The letter glyphs are hand-authored stroke polylines in
 `src/world/strokefont.ts`, not a system font, so clue legibility does not
@@ -137,8 +140,15 @@ jitter and affine warp off.
 |---|---|---|---|
 | **Demon** (`src/game/demon.ts`) | 2.55 units. Tapered 5-sided solids rather than plain boxes: forward-pitched torso with four rib slats, long neck, tapered skull with a hinged jaw, segmented legs (thigh + shin + foot) with backward-bending knees, segmented arms (upper + forearm + long hand) reaching below the knee, face quad and two emissive eye quads. `surf.demon.skin`, `surf.demon.face` | Group origin at the feet, local +Z = facing. Every limb segment pivots at its joint; forearms and shins are children of the upper segments | AUTHORED-BY-ENGINE |
 | **Diamond** | Scaled octahedron + billboarded `glow` quad, emissive 1.5, slow Y rotation | Centre of the stone | AUTHORED-BY-ENGINE |
-| **Gun (world)** | 4 boxes + billboarded glint quad | Centre of the cylinder | AUTHORED-BY-ENGINE |
-| **Gun (first person)** | 4 boxes + muzzle-flash quad, rendered in a separate overlay pass with depth cleared so it never clips walls | Grip, offset (0.11, −0.085, −0.26) from the eye | AUTHORED-BY-ENGINE |
+| **Signal pistol (world)** | 4 boxes + billboarded glint quad, in the records emergency station | Centre of the breech | AUTHORED-BY-ENGINE |
+| **Signal pistol (first person)** | 4 boxes + muzzle-flash quad, scaled 0.46 and offset (0.125, −0.085, −0.34) from the eye, rendered in a separate overlay pass with depth cleared so it never clips walls | Grip | AUTHORED-BY-ENGINE |
+| **Flare cartridge (pickup)** | 6-sided cylinder + emissive cap + glint quad, ×3 placements | Centre of the shell | AUTHORED-BY-ENGINE |
+| **Burning flare** | 6-sided cylinder at emissive 2.6 + billboarded additive halo, flickering and guttering out over its last two seconds. Occupies one of three dynamic light slots in the world shader | Centre | AUTHORED-BY-ENGINE |
+| **Personal box** | Box body + hinged lid that swings up 1.9 rad when unlocked, with an R. HARDING tag plate | Lid hinges on its back edge | AUTHORED-BY-ENGINE |
+| **Brass key** | 3 boxes, colour-coded amber + glint quad | Centre of the shaft | AUTHORED-BY-ENGINE |
+| **Crucifix (pickup)** | 2 boxes, emissive 0.5 + glint quad | Foot of the upright | AUTHORED-BY-ENGINE |
+| **Pentagram** | `decal.pentagram` on a floor quad at emissive 1.15, plus a billboarded additive haze 0.5 above it so it reads as light coming *out* of the floor | Centre of the seal | AUTHORED-BY-ENGINE |
+| **Placed cross** | 2 boxes at emissive 0.7, hidden until the ritual starts, standing in the middle of the seal | Foot of the upright | AUTHORED-BY-ENGINE |
 | **Front door** | 2 sliding leaves + frame + EXIT sign | Leaves slide ±2.9 units on X when unlocked | AUTHORED-BY-ENGINE |
 
 **Demon animation names** (procedural, driven by distance travelled and state —
@@ -153,6 +163,8 @@ no clips, no skinning):
 | `stand` | `reveal` | Dead still except head tracking; body self-illumination lifted to 0.5 so the first sighting survives the fog |
 | `attack` | `attack` | Both arms thrown forward and splayed, forearms opening, torso pitched hard over, jaw wide, 0.42 s windup |
 | `death` | `dead` | Falls forward over 1.5 s, then fades over 0.9 s, hidden at 2.4 s |
+| `burn` | `burning` | Hit by a flare: emissive flares to 1.6 ±0.5 at 40 Hz, stride triples, it runs directly away from the player at 7 u/s while scaling to 0.1 and fading to nothing over 1.6 s |
+| `absent` | `absent` | Off the board on a flare budget. Hidden, unperceiving, unhittable |
 
 ### 3.8 Ending stills — 3 assets
 
@@ -178,6 +190,9 @@ with HRTF; the listener tracks the camera.
 | `demon.growl` | Loop, positional | Noise at 0.55× rate + 47 Hz saw → resonant lowpass swept by agitation | AUTHORED-BY-ENGINE |
 | `player.heartbeat` | Loop | Two sine thumps per beat, 62–134 BPM by proximity and chase state | AUTHORED-BY-ENGINE |
 | `step_concrete` / `step_metal` / `step_tile` | One-shot | Filtered noise bursts, per-region surface, louder when sprinting | AUTHORED-BY-ENGINE |
+| `flare_fire` | One-shot | Hollow thump plus a hiss, deliberately not a gunshot | AUTHORED-BY-ENGINE |
+| `demon_ignite` | One-shot, positional | Ignition, then something large leaving at speed: noise burst, long descending saw pair | AUTHORED-BY-ENGINE |
+| `ritual` | One-shot, positional | Low swell, a five-note struck-bell cluster, and the floor taking something back | AUTHORED-BY-ENGINE |
 | `draught` | One-shot, positional | Air pulling through a gap in masonry, played near the false wall every 3-6 s. The only audible cue that the wall is not a wall — it replaced a sign that gave the secret away | AUTHORED-BY-ENGINE |
 | `knock` | One-shot, positional | Low sine thump + noise, doubled. Placed **inside a wall near the player** — the note's "something knocked from inside the walls". Every 20–42 s before the diamond, 6–14 s after it | AUTHORED-BY-ENGINE |
 | `relay`, `clunk`, `latch` | One-shot | Switch and solenoid transients for the three devices | AUTHORED-BY-ENGINE |
@@ -195,15 +210,15 @@ Performed against the `dist/` build used for the acceptance run.
 |---|---|
 | Binary asset files in `dist/` | **None.** `dist/` = `index.html`, one `.css`, one `.js` |
 | External asset fetches at runtime | **None.** No `fetch`, no loaders, no CDN references |
-| Texture generators reachable but unused | **None.** All 27 statically named generators in §3, plus every run-generated family (`decal.blood.*`, `sign.*`, `sign.diagram.*`, `surf.lamp.*`, `glow.*`, `flat.*`), were observed bound to live geometry. Verified by walking both scene graphs — see route 10 of `npm test` |
+| Texture generators reachable but unused | **None.** All 29 statically named generators in §3, plus every run-generated family (`decal.blood.*`, `sign.*`, `sign.diagram.*`, `surf.lamp.*`, `glow.*`, `flat.*`), were observed bound to live geometry. Verified by walking both scene graphs — see route 10 of `npm test` |
 | Temporary development geometry | **None in the release.** Layout and collision were developed against the same grid data that ships; the only debug affordances are `window.__BB` (a function table over existing public methods, used by the tests) and a render/audio fast-forward toggle used by the tests. Neither draws anything |
 | Untextured or default-material meshes | **None.** All 224 meshes use the project's own shader with an explicit `map`: 0 untextured, 0 foreign materials, 0 unnamed textures |
 | Unapproved third-party assets | **None.** No fonts, images, models or sounds are shipped. Sign body text uses the player's monospace font; the clue letters do not depend on any font |
 | Assets with no art owner | **All of them** — see §1. This is the one audit finding, and it is a process gap, not a defect in the build |
 
-Build inventory, as measured by route 10: **224 meshes, 19,317 triangles, 86
-distinct textures bound, 36 baked lights, 33 visible fixtures, 56 collision
-volumes, 13 regions.** Internal render buffer is 224 lines tall with the width
+Build inventory, as measured by route 10: **264 meshes, 19,649 triangles, 93
+distinct textures bound, 36 baked lights, 33 visible fixtures, 58 collision
+volumes, 13 regions**, plus up to 3 dynamic flare lights. Internal render buffer is 224 lines tall with the width
 following the window aspect (358×224 at 16:10, 398×224 at 16:9).
 
 This audit is a test, not a claim: `npm test` route 10 re-runs all of it and
@@ -224,7 +239,12 @@ state. Screenshots regenerate with `node test/vantages.mjs` and
 | Medium | **Blood letters** | 22 individual 128×256 alpha decals, one per curated letter, plus 4 numeral plates — **individual, not composed strings**, because the engine assembles each run's four clues at load time. | `test/vantages/clue-III.png`, `clue-IV.png` |
 | Medium | **Puzzle faces** | Three 256² device fronts per §3.4. They double as the device doors, so the whole plate must read as a closed door. | `test/vantages/counter-safe.png`, `breaker-cabinet.png`, `door-lock-panel.png` |
 | Medium | **Audio pass** | Replace the synthesis in §4 with recorded material if desired. The wall `knock` and the directional `demon.growl` are load-bearing for gameplay, not decoration: players judge distance from them. | — (listen in-game) |
-| Low | **Diamond and gun** | Hero props, ≤120 triangles each. The diamond needs to be identifiable as a light source from 40 units down the vault. | `test/vantages/vault-diamond.png`, `secret-room.png` |
+| High | **Glowing pentagram and placed cross** | A 128² alpha decal for the seal plus a ≤60-triangle cross. The seal must read as cut into concrete and lit from within, legible from the doorway of a 4×3-cell room, and must not look like set dressing — it is the only permanent kill in the game. The placed cross has to be obviously *in* the seal, not on top of it. | `test/vantages/pentagram-close.png`, `secret-room.png`, `test/screenshots/route18-seal-armed.png` |
+| High | **Demon ignition and disappearance** | The 1.6 s `burn` state in §3.7: catching alight, fleeing, and going. This is the payoff for spending a cartridge and currently it is an emissive pulse plus a scale-and-fade. Wants real fire. | `test/screenshots/route16-ignited.png` |
+| Medium | **Flare gun, cartridges and burning flares** | A ≤80-triangle signal pistol (world and first-person variants — the first-person one is held at 0.46 scale, so detail below ~2 cm is wasted), a cartridge pickup, and the burning-flare effect. The burning flare is a light source first and an object second: whatever replaces it must still read as the brightest thing in the room from 15 units. | `test/screenshots/route15-flare-lit.png`, `route15-dark-before.png`, `test/vantages/records-flaregun.png` |
+| Medium | **Personal box, brass key and crucifix** | A lidded steel deed box with a small brass lock, a brass key, and a consecrated crucifix. The two keys must be unmistakable from each other at a glance in a dark room — the brass one is amber, the steel cabinet key is pale. | `test/vantages/records-flaregun.png`, `personal-box.png`, `test/screenshots/route17-box-locked.png` |
+| Medium | **Ritual effects** | The 3.2 s protected sequence: currently a red screen fade plus the audio in §4. Wants something that reads as the floor taking something. | `test/screenshots/route18-ritual-live.png`, `route3-ritual-done.png` |
+| Low | **Diamond** | Hero prop, ≤120 triangles. Needs to be identifiable as a light source from 40 units down the vault. | `test/vantages/vault-diamond.png` |
 | Low | **Environment props** | Crates, lockers, benches, pipes, machinery. Collision is defined by axis-aligned boxes in `src/world/props.ts` and is independent of the visual mesh, so art can be swapped without re-testing collision. | `test/vantages/records.png`, `tunnel-mouth.png`, `pump-chamber.png` |
 
 ## 7. Scenes still needing visual verification by a human
@@ -232,7 +252,10 @@ state. Screenshots regenerate with `node test/vantages.mjs` and
 Automated screenshots exist for all of these; none has been looked at by a
 person other than the agent that produced it.
 
-- All 20 facility vantages in `test/vantages/`
+- All 24 facility vantages in `test/vantages/`, including the seal, the
+  emergency station and the personal box
+- The flare in flight, burning on the floor, and lighting a corridor
+- The demon's ignition, and the ritual sequence
 - All 4 demon vantages, especially the first reveal at 24 units
 - All 24 interface states in `test/ui/`
 - Motion, which screenshots cannot show at all: the vertex jitter and affine

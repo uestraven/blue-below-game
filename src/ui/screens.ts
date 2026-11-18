@@ -288,7 +288,7 @@ export function controlsScreen(onBack: () => void, inRun: boolean): ScreenSpec {
         <div class="k">MOUSE</div><div class="v">Look, and aim the gun once you have it</div>
         <div class="k">SHIFT</div><div class="v">Sprint. Finite, and the loudest thing you can do</div>
         <div class="k">E</div><div class="v">Interact: read, use a device, pick something up</div>
-        <div class="k">LEFT CLICK</div><div class="v">Fire, when the gun is equipped</div>
+        <div class="k">LEFT CLICK</div><div class="v">Fire a flare, once you have the signal pistol</div>
         <div class="k">ESC</div><div class="v">Close an interaction, or pause while exploring</div>
         <div class="k">TAB</div><div class="v">Clue journal (also on the pause screen)</div>
       </div>
@@ -423,6 +423,30 @@ export function decisionScreen(opts: { onTake: () => void; onLeave: () => void; 
   };
 }
 
+/** Placing the cross in the seal. Permanent, so it is a confirmed choice. */
+export function ritualDecisionScreen(opts: { onPlace: () => void; onBack: () => void }): ScreenSpec {
+  return {
+    id: 'ritual-decision',
+    wide: true,
+    html: `
+      <h2>The Seal</h2>
+      <p>The cuts in the floor are packed with something that has never dried.
+      In the middle of the star there is a worn patch about the size of two
+      hands, smoother than the concrete around it.</p>
+      <p>The crucifix in your pocket is the right size for it.</p>
+      <p class="quote">&ldquo;Put something holy in the seal and whatever the
+      blue stone let out goes into the floor with it, and stays there.&rdquo;</p>
+      <p class="hint">You only have the one. Setting it down is not something
+      you can take back.</p>
+    `,
+    choices: [
+      { label: 'PLACE THE CROSS', note: 'Give it up. For good.', onPick: opts.onPlace },
+      { label: 'NOT YET', note: 'Keep it and step back from the seal.', onPick: opts.onBack },
+    ],
+    onEscape: opts.onBack,
+  };
+}
+
 export function confirmLeaveScreen(opts: { onConfirm: () => void; onCancel: () => void }): ScreenSpec {
   return {
     id: 'confirm-leave',
@@ -467,10 +491,26 @@ export function pauseScreen(opts: {
       <div class="kv">
         <div class="k">OBJECTIVE</div><div class="v">${escapeHtml(objective)}</div>
         <div class="k">CARRYING</div><div class="v">${escapeHtml(
-          [p.diamondTaken ? 'the diamond' : null, p.hasKey ? 'cabinet key' : null, p.hasGun ? (p.roundSpent ? 'empty gun' : 'gun, one round') : null]
+          [
+            p.diamondTaken ? 'the diamond' : null,
+            p.hasCabinetKey ? 'steel key' : null,
+            p.hasBoxKey ? 'brass key' : null,
+            p.hasCross ? 'brass crucifix' : null,
+            p.hasFlareGun ? (p.flares > 0 ? `signal pistol (${p.flares})` : 'signal pistol (empty)') : null,
+            !p.hasFlareGun && p.flares > 0 ? `${p.flares} flares` : null,
+          ]
             .filter(Boolean)
             .join(', ') || 'nothing',
         )}</div>
+        <div class="k">THE SEAL</div><div class="v">${
+          p.ritualDone
+            ? 'the ritual is done - it is gone for good'
+            : p.crossPlaced
+              ? 'cross placed, waiting'
+              : p.hasCross
+                ? 'you are carrying something it wants'
+                : 'nothing placed'
+        }</div>
         <div class="k">CLUES FOUND</div><div class="v">${p.cluesFound.length} of 4</div>
       </div>
     `,
@@ -583,6 +623,10 @@ export function endingScreen(kind: EndingArt, run: RunState, onRestart: () => vo
         doorway does when something tall is standing in it, and it steps out
         after you onto open ground, and it does not hurry, because it does not
         have to any more.</p>
+        <p>If you put a flare in it on the way out, that bought you a minute,
+        and the minute is over. A flare was never going to be enough. There
+        was a seal in the floor of a room somebody had bricked up, and a box in
+        records with a key you could have found.</p>
         <p>You got paid. There is a city twenty minutes down that road with its
         lights on, and it is walking that way.</p>
         <p class="danger">You brought it out. It is loose, and that is on you.</p>
@@ -597,14 +641,19 @@ export function endingScreen(kind: EndingArt, run: RunState, onRestart: () => vo
     html: `
       ${artHtml}
       <h2 class="good">The Good Ending</h2>
-      <p>One round. You stood still and let it come and you put the round in its
-      chest, and it went down in the dark of the service tunnels and it did not
-      get up again, and the knocking in the walls stopped with it.</p>
-      <p>Then you still had a safe to open, a panel to throw and a door to dial,
-      because none of that cared whether the thing was dead.</p>
+      <p>You set a dead man&rsquo;s crucifix down in the middle of a star cut
+      into a concrete floor, in a room somebody had bricked up and somebody
+      else had cut open again, and the light in the cuts came up.</p>
+      <p>Whatever the blue stone let out went into the floor after it. Not
+      driven off, not burned back for a minute and a half &mdash; taken, and
+      kept. The knocking in the walls stopped with it.</p>
+      <p>Then you still had a safe to open, a panel to throw and a door to
+      dial, because none of that cared what you had just done.</p>
       <p>You cross the threshold at first light with the stone in your pocket
-      and nothing behind you but a building with its power on and nobody in it.</p>
-      <p class="good">You keep the diamond. Whatever owned it is finished.</p>
+      and nothing behind you but a building with its power on and nobody in
+      it.</p>
+      <p class="good">You keep the diamond. What the diamond released is in
+      the floor of the sealed store, and it is staying there.</p>
       ${stats}
     `,
     choices: [{ label: 'TAKE THE JOB AGAIN', onPick: onRestart }],

@@ -43,8 +43,14 @@ interface BakedLight extends LightDef {
  * fixture should land near its own texture value, a mid-room surface around a
  * third of it, and a far corner should need the handlamp.
  */
-const LIGHT_GAIN = 2.6;
-const AMBIENT_GAIN = 2.2;
+const LIGHT_GAIN = 2.25;
+/**
+ * Deliberately low. The facility is dark enough that a burning flare is worth
+ * a cartridge, while still leaving enough to navigate by, pick interactables
+ * out of the gloom, and read the wall clues - all of which are rendered with
+ * their own emissive or at full texture value rather than relying on this.
+ */
+const AMBIENT_GAIN = 1.75;
 
 class Accum {
   pos: number[] = [];

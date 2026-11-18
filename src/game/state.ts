@@ -18,16 +18,48 @@ export type BreakerLabel = (typeof BREAKER_LABELS)[number];
 export const SAFE_MODIFIERS = [4, -3, 7] as const;
 export const SAFE_TARGET = 8;
 
+/** Seconds of active gameplay a flare hit keeps the demon off the board. */
+export const FLARE_SUPPRESSION_SECONDS = 60;
+/** How long a burning flare lights the room for, in seconds. */
+export const FLARE_BURN_SECONDS = 22;
+/** Flares the gun is already loaded with when found, plus the loose pickups. */
+export const FLARE_GUN_LOADED = 1;
+
 export interface Progress {
   diamondTaken: boolean;
   revealPlayed: boolean;
   safeOpen: boolean;
-  hasKey: boolean;
+  /** The counter-safe key, which opens the breaker cabinet. */
+  hasCabinetKey: boolean;
   powerRestored: boolean;
   doorUnlocked: boolean;
-  footlockerOpen: boolean;
-  hasGun: boolean;
-  roundSpent: boolean;
+
+  // --- flare gun -------------------------------------------------------
+  hasFlareGun: boolean;
+  /** Flares in hand. The gun is found loaded with one. */
+  flares: number;
+  /** Ids of the loose flare pickups already taken, so they stay taken. */
+  flaresTaken: string[];
+  /** Flares fired this run, for the playtest report and the HUD. */
+  flaresFired: number;
+
+  // --- the ritual chain ------------------------------------------------
+  /** The brass key, which opens the personal box. Not the cabinet key. */
+  hasBoxKey: boolean;
+  personalBoxOpen: boolean;
+  hasCross: boolean;
+  /** The cross is in the pentagram. Set the instant it is placed. */
+  crossPlaced: boolean;
+  /** The ritual has resolved and the demon is permanently dead. */
+  ritualDone: boolean;
+  pentagramInspected: boolean;
+
+  /**
+   * Seconds of active gameplay still to run before a flare-suppressed demon
+   * comes back. 0 means it is not suppressed.
+   */
+  demonAbsence: number;
+
   demonDead: boolean;
   noteRead: boolean;
   frontDoorInspected: boolean;
@@ -93,12 +125,20 @@ export class RunState {
       diamondTaken: false,
       revealPlayed: false,
       safeOpen: false,
-      hasKey: false,
+      hasCabinetKey: false,
       powerRestored: false,
       doorUnlocked: false,
-      footlockerOpen: false,
-      hasGun: false,
-      roundSpent: false,
+      hasFlareGun: false,
+      flares: 0,
+      flaresTaken: [],
+      flaresFired: 0,
+      hasBoxKey: false,
+      personalBoxOpen: false,
+      hasCross: false,
+      crossPlaced: false,
+      ritualDone: false,
+      pentagramInspected: false,
+      demonAbsence: 0,
       demonDead: false,
       noteRead: false,
       frontDoorInspected: false,
@@ -160,7 +200,21 @@ export class RunState {
 
   /** Whether the breaker cabinet can be opened. */
   get breakerUsable(): boolean {
-    return this.progress.hasKey;
+    return this.progress.hasCabinetKey;
+  }
+
+  /**
+   * The demon is off the board permanently. Only the ritual does this; a flare
+   * hit is temporary relief, which is what makes the Bad Ending reachable while
+   * the demon is merely absent.
+   */
+  get demonPermanentlyDead(): boolean {
+    return this.progress.ritualDone;
+  }
+
+  /** The demon is temporarily burned off, with time still to run. */
+  get demonSuppressed(): boolean {
+    return !this.progress.ritualDone && this.progress.demonAbsence > 0;
   }
 
   /**

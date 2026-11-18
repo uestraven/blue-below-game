@@ -97,6 +97,13 @@ uniform float uFlashRange;
 uniform float uFlashInner;
 uniform float uFlashOuter;
 
+// Burning flares. The facility's own lighting is baked into vertex colours at
+// load time, so a flare - which is thrown, moves, and dies - has to be a real
+// dynamic light. Three slots is enough: the player can only carry four.
+uniform vec3 uFlarePos[3];
+uniform vec3 uFlareColor[3];
+uniform float uFlareRange[3];
+
 varying vec2 vUvW;
 varying float vW;
 varying vec2 vUvLin;
@@ -123,6 +130,21 @@ void main() {
   float atten = 1.0 - clamp(dist / uFlashRange, 0.0, 1.0);
   atten *= atten;
   vec3 lamp = uFlashColor * (ndl * cone * atten);
+
+  // Flares: omnidirectional, wrapped so a surface turned away still catches
+  // some of it, because a flare on the floor lights a ceiling by bounce.
+  for (int i = 0; i < 3; i++) {
+    float range = uFlareRange[i];
+    if (range <= 0.0) continue;
+    vec3 fl = uFlarePos[i] - vWorld;
+    float fd = length(fl);
+    if (fd >= range) continue;
+    vec3 fdir = fl / max(fd, 0.0001);
+    float fndl = max(dot(n, fdir), 0.0) * 0.72 + 0.28;
+    float fatt = 1.0 - clamp(fd / range, 0.0, 1.0);
+    fatt *= fatt;
+    lamp += uFlareColor[i] * (fndl * fatt);
+  }
 
   vec3 lit = tex.rgb * (vLight * uTint + lamp) + tex.rgb * uEmissive;
 
@@ -196,10 +218,13 @@ export class PsxRenderer {
     uFlashDir: { value: new THREE.Vector3(0, 0, -1) },
     // The handlamp. Wide and soft: it is there so the player can read the
     // facility, not so they can floodlight it.
-    uFlashColor: { value: new THREE.Color(0.66, 0.63, 0.57) },
-    uFlashRange: { value: 19 },
+    uFlashColor: { value: new THREE.Color(0.58, 0.55, 0.5) },
+    uFlashRange: { value: 17 },
     uFlashInner: { value: 0.78 },
     uFlashOuter: { value: 0.3 },
+    uFlarePos: { value: [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()] },
+    uFlareColor: { value: [new THREE.Color(), new THREE.Color(), new THREE.Color()] },
+    uFlareRange: { value: [0, 0, 0] },
   };
 
   private postScene = new THREE.Scene();
@@ -331,6 +356,9 @@ export class PsxRenderer {
         uFlashRange: this.shared.uFlashRange,
         uFlashInner: this.shared.uFlashInner,
         uFlashOuter: this.shared.uFlashOuter,
+        uFlarePos: this.shared.uFlarePos,
+        uFlareColor: this.shared.uFlareColor,
+        uFlareRange: this.shared.uFlareRange,
       },
       vertexShader: VERT,
       fragmentShader: FRAG,

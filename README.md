@@ -107,7 +107,7 @@ Both are reproducible: every procedural asset is seeded from its own name.
 | **Mouse** | Look, and aim the gun once you have it |
 | **Shift** | Sprint. Finite, and the loudest thing you can do |
 | **E** | Interact: read, use a device, pick something up |
-| **Left click** | Fire, when the gun is equipped |
+| **Left click** | Fire a flare, once you have the signal pistol |
 | **Esc** | Close an interaction, or pause while exploring |
 | **Tab** | Clue journal (also reachable from the pause screen) |
 
@@ -156,12 +156,40 @@ because each one unlocks the next:
    painted on four walls in blood, marked `I` to `IV`. The numeral is the
    letter's position. They can be found in any order and revisited any time.
 
-Behind a false wall in the maze is a sealed store, and in a footlocker in that
-store is a gun with **one** round. Nothing signposts the false wall: there is a
-seam in the masonry, scratch marks beside it, and a draught you can hear. A
-confirmed hit kills the demon permanently for that run; a miss spends the round
-and you can still escape. Killing it does not excuse you from any of the three
-puzzles.
+### The flare gun
+
+In the records annex there is an emergency signal kit holding a **signal
+pistol, loaded with one flare**. Three more flare cartridges are scattered
+through the facility — one in the parallel corridor, one on a shelf beside the
+breaker cabinet, one dropped in the maze sump. **Four shots per run.**
+
+A fired flare is a real object: it travels, falls, skids, and then burns on the
+floor for about twenty seconds, lighting everything around it. The facility is
+dark enough that spending a cartridge to see a room is a genuine decision, and
+light enough that you can always navigate, recognise what you can interact
+with, and read the wall clues without firing one.
+
+A flare that lands **in the demon** sets it alight. It goes through a wall
+burning and stays off the board for **sixty seconds of active gameplay** — the
+clock stops dead while the game is paused or while a device panel has it
+suspended — then comes back somewhere away from you and out of your sight, with
+an audible warning first. That is relief, not a kill. Escaping while it is
+merely absent is still the Bad Ending.
+
+### The ritual
+
+Behind a false wall in the maze is a sealed store. Nothing signposts it: a seam
+in the masonry, scratch marks beside it, and a draught you can hear. Cut into
+the floor inside is a **glowing pentagram**, and a note from the man who opened
+the wall explaining what it is — a grave waiting for a headstone.
+
+Somewhere else in the facility is a **small brass key**, and in the records
+annex is a locked **personal box** belonging to the man who owned it. You can
+find and inspect the box long before the key. Inside is a **brass crucifix**.
+
+Put the cross in the seal and the thing the diamond released goes into the
+floor with it, permanently. That is the only way to kill it for good — and it
+still leaves you a safe to open, a panel to throw and a door to dial.
 
 **Hiding is not the same as a device panel.** A panel suspends the demon
 entirely. Hiding does not: the world keeps running and it keeps hunting, so it
@@ -175,8 +203,14 @@ seconds of sprint — enough to get round a corner and not much more. Sprinting 
 also the loudest thing you can do, so it hears you from twice as far. Standing
 still beside it is what gets you killed.
 
-- **Bad Ending** — cross the threshold with the stone while it is alive.
-- **Good Ending** — cross the threshold with the stone after killing it.
+- **Bad Ending** — cross the threshold with the stone while it is still alive,
+  *including* while it is temporarily absent after a flare hit.
+- **Good Ending** — cross the threshold with the stone after completing the
+  cross ritual.
+
+If you place the cross before taking the diamond, the seal sits armed and the
+ritual resolves at the moment lifting the stone releases the thing — the same
+permanent outcome, staged at the reveal.
 
 Opening any device panel suspends the demon entirely — it stops moving,
 detecting and attacking, and keeps its exact position and chase state — locks
@@ -215,7 +249,8 @@ src/
     strokefont.ts         hand-authored glyphs for the blood letters
     palette.ts            the 18-colour palette
   game/
-    game.ts               phase machine, interaction, reveal, gun, endings
+    game.ts               phase machine, interaction, reveal, ritual, endings
+    flares.ts             flare projectiles, burning, and dynamic flare light
     player.ts             movement, collision, footsteps, view locking
     demon.ts              patrol / investigate / chase / search, suspension
     state.ts              run state, generated secrets, the checkpoint

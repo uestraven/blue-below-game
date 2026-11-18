@@ -19,7 +19,19 @@ import { PAL } from '../world/palette';
 import type { PsxRenderer } from '../render/psx';
 import type { WorldBuild } from '../world/build';
 
-export type DemonState = 'dormant' | 'reveal' | 'patrol' | 'investigate' | 'chase' | 'search' | 'attack' | 'dead';
+export type DemonState =
+  | 'dormant'
+  | 'reveal'
+  | 'patrol'
+  | 'investigate'
+  | 'chase'
+  | 'search'
+  | 'attack'
+  /** On fire and leaving. Plays out, then goes to `absent`. */
+  | 'burning'
+  /** Off the board on a flare-suppression budget. Not dead. */
+  | 'absent'
+  | 'dead';
 
 export const DEMON_RADIUS = 0.5;
 const SPEED_PATROL = 2.35;
@@ -86,6 +98,7 @@ export class Demon {
   private attackTimer = 0;
   private walkPhase = 0;
   private deathTimer = 0;
+  private burnTimer = 0;
   private stuckTimer = 0;
   private lastX = 0;
   private lastZ = 0;
@@ -264,6 +277,7 @@ export class Demon {
     this.revealTimer = 0;
     this.attackTimer = 0;
     this.deathTimer = 0;
+    this.burnTimer = 0;
     this.stuckTimer = 0;
     this.patrolIndex = 0;
     this.wanderTarget = null;
@@ -306,6 +320,51 @@ export class Demon {
     this.repathTimer = 0;
   }
 
+  /**
+   * Hit by a flare. It burns, flees, and leaves the board - temporarily. This
+   * is not `kill()`: `alive` stays true, because the Bad Ending must still be
+   * reachable while it is merely absent.
+   */
+  ignite(): void {
+    if (!this.alive || this.state === 'dormant' || this.state === 'dead') return;
+    this.state = 'burning';
+    this.burnTimer = 1.6;
+    this.suspended = false;
+    this.senses.sees = false;
+    this.senses.agitation = 1;
+    this.path = [];
+    this.pathIndex = 0;
+  }
+
+  /** Back on the board at `gx,gz`, facing the player, hunting from scratch. */
+  returnFromBurn(gx: number, gz: number, px: number, pz: number): void {
+    this.x = cx(gx);
+    this.z = cz(gz);
+    this.lastX = this.x;
+    this.lastZ = this.z;
+    this.yaw = Math.atan2(px - this.x, pz - this.z);
+    this.alive = true;
+    this.suspended = false;
+    this.group.visible = true;
+    this.group.scale.set(1, 1, 1);
+    this.burnTimer = 0;
+    for (const m of this.materials) {
+      m.uniforms.uOpacity.value = 1;
+      m.transparent = false;
+      (m.uniforms.uTint.value as THREE.Color).setRGB(1, 1, 1);
+    }
+    this.state = 'patrol';
+    this.patrolIndex = this.nearestPatrolIndex();
+    this.path = [];
+    this.repathTimer = 0;
+    this.grace = 1.5;
+  }
+
+  /** True while it is off the board after a flare hit. */
+  get absent(): boolean {
+    return this.state === 'absent';
+  }
+
   kill(): void {
     if (!this.alive) return;
     this.alive = false;
@@ -342,6 +401,43 @@ export class Demon {
     }
 
     if (this.grace > 0) this.grace = Math.max(0, this.grace - dt);
+
+    if (this.state === 'absent') {
+      // Off the board. Nothing to see, nothing to hear, nothing to hit.
+      this.senses.sees = false;
+      this.senses.distance = 999;
+      this.senses.agitation = 0;
+      this.group.visible = false;
+      return;
+    }
+
+    if (this.state === 'burning') {
+      // Runs for it, on fire, then leaves. Deliberately unkillable mid-burn.
+      this.burnTimer -= dt;
+      this.senses.sees = false;
+      this.senses.agitation = 1;
+      const t = 1 - Math.max(0, this.burnTimer) / 1.6;
+      for (const m of this.materials) m.uniforms.uEmissive.value = 1.6 + Math.sin(t * 40) * 0.5;
+      this.walkPhase += dt * 16;
+      this.animatePose(SPEED_CHASE, dt);
+      // Flails away from the player while it goes.
+      const away = Math.atan2(this.x - player.x, this.z - player.z);
+      this.yaw = approachAngle(this.yaw, away, dt * 5);
+      const moved = grid.moveDisc(this.x, this.z, Math.sin(this.yaw) * 7 * dt, Math.cos(this.yaw) * 7 * dt, DEMON_RADIUS);
+      this.x = moved.x;
+      this.z = moved.z;
+      this.group.scale.setScalar(Math.max(0.05, 1 - t * 0.9));
+      for (const m of this.materials) {
+        m.uniforms.uOpacity.value = Math.max(0, 1 - t);
+        m.transparent = true;
+      }
+      this.applyTransform();
+      if (this.burnTimer <= 0) {
+        this.state = 'absent';
+        this.group.visible = false;
+      }
+      return;
+    }
 
     if (this.suspended) {
       // Frozen: no movement, no detection, no attack. The pose is held.
@@ -703,11 +799,17 @@ export class Demon {
     // right for the camera, because a camera looks down -z - turns the face
     // round and makes it invisible.
     this.group.rotation.y = this.yaw;
-    this.group.visible = this.state !== 'dormant' && (this.alive || this.deathTimer <= 2.4);
+    this.group.visible =
+      this.state !== 'dormant' && this.state !== 'absent' && (this.alive || this.deathTimer <= 2.4);
   }
+
+  /** Extra light sources that are not baked, e.g. burning flares. */
+  extraLight: ((x: number, y: number, z: number, out: THREE.Color) => void) | null = null;
 
   private applyLighting(): void {
     this.wb.sampleLight(this.x, 1.5, this.z, this.tintColor);
+    // A flare on the floor should light the thing standing over it.
+    this.extraLight?.(this.x, 1.5, this.z, this.tintColor);
     // Floor the tint so the silhouette never vanishes completely; the player
     // has to be able to read where it is even in the darkest tunnel.
     const r = Math.max(this.tintColor.r, 0.24);

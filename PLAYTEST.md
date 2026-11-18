@@ -6,7 +6,7 @@ driven in headless Chromium 159 (SwiftShader software GL).
 Reproduce everything here with:
 
 ```bash
-npm test                 # 14 routes, 297 checks
+npm test                 # 18 routes, 431 checks
 node test/vantages.mjs   # 24 in-world screenshots
 node test/ui-shots.mjs   # 24 interface screenshots
 ```
@@ -15,7 +15,7 @@ node test/ui-shots.mjs   # 24 interface screenshots
 
 ## 1. Result summary
 
-**297 / 297 checks passed across 14 routes. All three endings verified.**
+**431 / 431 checks passed across 18 routes. All three endings verified.**
 
 | Route | What it plays | Result |
 |---|---|---|
@@ -33,6 +33,10 @@ node test/ui-shots.mjs   # 24 interface screenshots
 | 12 | Real keyboard input: movement speeds, interaction, menus, a device panel | ✓ |
 | 13 | Hiding: invisible to the demon, and not a suspension | ✓ |
 | 14 | Chase balance: reacting and moving away is enough to escape | ✓ |
+| 15 | Flares: four shots, spent correctly, and they light the place | ✓ |
+| 16 | Flare hit: 60 active seconds, paused by panels, Bad Ending while absent | ✓ |
+| 17 | Two keys, two locks, and the cross collected exactly once | ✓ |
+| 18 | The ritual kills permanently from every demon state | ✓ |
 
 How the harness plays: it picks real menu choices, presses real puzzle
 controls, walks with the real collision code and fires with the real hit check.
@@ -138,6 +142,56 @@ locker, a low letterbox for under a desk, a lid gap for a crate.
 The important design decision: **hiding is not suspension.** A device panel
 freezes the demon. Hiding leaves the world running, so it comes to where it
 last perceived you, searches, and gives up on its own. Verified in route 13.
+
+---
+
+## 1b. Feature round: flare gun, two keys, and the ritual
+
+The special gun was replaced wholesale. What changed, and what it cost:
+
+- **The flare gun** replaces the revolver, in the records annex emergency
+  station, loaded with one flare, with three more cartridges placed around the
+  facility. Flares are real projectiles that travel, fall and burn on the floor
+  for ~20 s, occupying one of **three dynamic light slots** added to the world
+  shader — the facility's own lighting is baked into vertex colours at load
+  time, so a thrown light source could not be one of those.
+- **The facility was darkened** (light gain 2.6 → 2.25, ambient 2.2 → 1.75,
+  handlamp range 19 → 17) so a cartridge is worth spending. Route 15 pins both
+  ends of that: dark enough to matter, not so dark it cannot be navigated.
+- **A flare hit is temporary.** Sixty seconds of *active* gameplay, with the
+  clock stopped by pausing and by any device panel. Permanent death is the
+  ritual and only the ritual, which is what keeps the Bad Ending reachable
+  while the demon is merely absent.
+- **The ritual chain** is brass key → personal box → crucifix → pentagram. The
+  gun pickup in the sealed store became the seal itself.
+- **Clue chain**, so the ritual is discoverable rather than arbitrary: the
+  records memo points at a sealed store off the tunnels, says the floor in
+  there needs *something consecrated*, names Harding's box and where he used to
+  wash his hands, and ends with *"a flare will only ever buy you a minute."*
+  The note pinned in the sealed store explains the seal is a grave waiting for
+  a headstone.
+
+### Defects found while building it
+
+1. **A judged hit always missed.** The flare was ballistic, so a confirmed hit
+   fired down a 24-unit corridor dropped ~6 units and buried itself in the
+   floor before reaching the demon. A shot already judged a hit at the trigger
+   now flies true and tracks its target; only unaimed flares arc.
+2. **Path smoothing cut straight through the false wall.** The false wall is
+   deliberately walkable, so the string-puller treated it as open space and
+   straightened corridor routes into diagonals that clipped through it and
+   dumped the body in the dead-end sealed store, where it then wedged against
+   a wall and could never leave. Smoothing now treats the false wall as solid
+   while A* can still step onto it on purpose.
+3. **A wedged body could never free itself.** `moveDisc` now pushes out of
+   geometry before attempting to move, which also covers a player caught by a
+   blocker that changes under them.
+4. **The first-person pistol was enormous**, filling a quarter of the screen
+   and reading as a crate. Scaled to 0.46 and the body texture retoned from
+   speckled orange to blued steel with an orange band.
+5. **A dead texture generator survived the refactor** (`surf.prop.gunmetal`).
+   Route 10's release audit failed the build until it was removed — which is
+   exactly what that audit is for.
 
 ---
 
@@ -297,6 +351,58 @@ cannot be trusted).
 | **R** | Resets the counter |
 | **Esc** | Steps back out; control restored; no key left stuck |
 
+### Route 15 — Flares and illumination
+
+| Check | Result |
+|---|---|
+| A loose flare can be picked up before the pistol | ✓, and firing does nothing without it |
+| The pistol is found loaded | 1 in it, 2 in hand after one loose cartridge |
+| Four flares total per run | ✓ (1 loaded + 3 placed) |
+| A collected flare stays collected | gone from the world; re-using adds nothing |
+| The dark corridor is dark | ambient light **0.161** |
+| …but navigable | above the 0.02 floor |
+| A flare floods where it lands | **0.316 → 1.772** at the landing point (5.6×) |
+| …and the player sees further for it | 0.161 → 0.222 back at the firing position |
+| All four can be spent, then it dry-fires | ✓ |
+| Simultaneous burning flares capped at the shader slot count | 3 |
+
+### Route 16 — A flare in the demon
+
+| Check | Result |
+|---|---|
+| The hit suppresses it | ✓ |
+| Suppression starts at the full budget | **60.0 s** |
+| It is still **alive** — a flare is not a kill | ✓ |
+| It burns, then leaves the board | `burning` → `absent` |
+| An absent demon cannot catch the player | 0 deaths |
+| **A device panel pauses the return clock** | 39.60 → 39.60 over 10 simulated seconds behind the safe panel |
+| **Pausing the game pauses the return clock** | unchanged over 10 simulated seconds |
+| Ordinary play does spend it | 39.45 → 37.35 over 2 s |
+| It returns away from the player | **116 units**, and with **no line of sight** |
+| The clock is cleared on return, and it hunts again | ✓ |
+| Escaping while it is merely absent | **BAD ending**, with 9.0 s still on its clock |
+
+### Route 17 — Two keys, two locks
+
+| Check | Result |
+|---|---|
+| The personal box exists from the start and reports itself locked | ✓ |
+| Inspecting it without the key gives a readable, and it does not open | ✓ |
+| The cross is not offered before the box is open | ✓ |
+| The **brass** key does not open the breaker cabinet | ✓, and the cabinet names the steel key |
+| The brass key **does** open the personal box | ✓ |
+| The **steel** key opens the breaker cabinet | ✓ |
+| The cross can be collected exactly once | gone from the world; re-using does nothing |
+| Both keys and the cross survive the checkpoint | ✓ |
+
+### Route 18 — The ritual, from every demon state
+
+| State when the cross goes down | Result |
+|---|---|
+| **Live hunt** | permanent kill, exactly once; the seal cannot be used again |
+| **Absent on a flare budget** (55 s left) | permanent kill, **pending return cancelled**, never comes back over 10 further simulated seconds |
+| **Before the diamond is taken** | the seal sits armed (`crossPlaced`, not `ritualDone`); taking the diamond stages the resolution at the reveal, and the run still reaches the **Good Ending** after all three puzzles and the threshold |
+
 ### Route 14 — Chase balance
 
 | Check | Result |
@@ -439,10 +545,11 @@ Not defects — design consequences the brief implies — but a human should
 confirm they feel right.
 
 - **One checkpoint, exactly as specified.** It is taken the instant the diamond
-  is lifted. If the player fetches the gun *after* the diamond and then dies,
-  the checkpoint predates the pickup and they lose the gun — it is back on its
-  crate in the secret store and must be re-fetched. Spec-conformant, possibly
-  frustrating.
+  is lifted, and it carries the flare count, which flares have been taken, both
+  keys, the cross, whether the cross has been placed, and the demon's remaining
+  absence time. Anything collected *after* the diamond is lost on a retry —
+  flares included, since they are part of the same progress record.
+  Spec-conformant, possibly frustrating.
 - **The demon can walk through the false wall.** Deliberate: the secret store
   is not a safe camping spot, and a thing that knocks from inside the walls
   should not be stopped by a fake one. It still blocks line of sight both ways,

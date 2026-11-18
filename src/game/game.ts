@@ -17,6 +17,7 @@ import { buildWorld, type WorldBuild } from '../world/build';
 import { buildProps, type PropsBuild, type Readable } from '../world/props';
 import {
   PLAYER_START,
+  PATROL,
   REVEAL,
   FALSE_WALL,
   FRONT_DOOR,
@@ -39,11 +40,13 @@ import {
   STAMINA_REGEN,
 } from './player';
 import { Demon, DEMON_RADIUS, SPEED_CHASE } from './demon';
-import { RunState } from './state';
+import { Flares } from './flares';
+import { RunState, FLARE_GUN_LOADED, FLARE_SUPPRESSION_SECONDS } from './state';
 import { Hud } from '../ui/hud';
 import { PuzzleHost, type PuzzleKind } from '../ui/puzzles';
 import {
   ScreenHost,
+  ritualDecisionScreen,
   titleScreen,
   briefingScreen,
   controlsScreen,
@@ -67,6 +70,8 @@ const PUZZLE_GRACE = 2.5;
 const REVEAL_MIN_DELAY = 16;
 /** How close the demon must get to interrupt a readable. */
 const READING_INTERRUPT = 13;
+/** Length of the protected ritual sequence, in seconds. */
+const RITUAL_SECONDS = 3.2;
 
 interface Interactable {
   id: string;
@@ -98,6 +103,7 @@ export class Game {
   demon!: Demon;
   run: RunState;
   puzzles!: PuzzleHost;
+  flares!: Flares;
 
   phase: Phase = 'title';
   private interactables: Interactable[] = [];
@@ -107,6 +113,7 @@ export class Game {
   private gunRecoil = 0;
   private knockTimer = 18;
   private draughtTimer = 1;
+  private ritualTimer = 0;
   /**
    * Counts down while the player has never sprinted. Sprinting is the single
    * most important verb in a chase and the first playtester did not know it
@@ -178,9 +185,12 @@ export class Game {
     for (const r of this.props.readables) this.readables.set(r.id, r);
 
     this.player = new Player(1);
+    this.flares = new Flares(this.psx, this.grid);
+    this.scene.add(this.flares.root);
     this.demon = new Demon(this.psx, this.world);
     this.scene.add(this.demon.group);
     this.demon.onCatch = () => this.onCaught();
+    this.demon.extraLight = (x, y, z, out) => this.flares.sample(x, y, z, out);
     this.demon.onSpot = () => {
       this.audio.play('roar', this.demon.centre, 0.9);
       this.hud.toast(this.sprintTaught ? 'It has seen you.' : 'It has seen you. HOLD SHIFT TO RUN.', 2.6);
@@ -218,6 +228,7 @@ export class Game {
     this.demon = new Demon(this.psx, this.world);
     this.scene.add(this.demon.group);
     this.demon.onCatch = () => this.onCaught();
+    this.demon.extraLight = (x, y, z, out) => this.flares.sample(x, y, z, out);
     this.demon.onSpot = () => {
       this.audio.play('roar', this.demon.centre, 0.9);
       this.hud.toast(this.sprintTaught ? 'It has seen you.' : 'It has seen you. HOLD SHIFT TO RUN.', 2.6);
@@ -256,17 +267,18 @@ export class Game {
       mesh.position.set(ox, oy, oz);
       return mesh;
     };
-    const metal = SURFACE.gunMetal();
+    // Signal pistol, not a revolver: a fat stubby muzzle and a blunt breech.
+    const body = SURFACE.flareBody();
     const grip = SURFACE.gunGrip();
-    this.gunGroup.add(mkPart(0.03, 0.035, 0.2, 0, 0.012, -0.12, metal));
-    this.gunGroup.add(mkPart(0.048, 0.062, 0.062, 0, 0, 0.02, metal));
-    this.gunGroup.add(mkPart(0.03, 0.095, 0.042, 0, -0.058, 0.07, grip));
-    this.gunGroup.add(mkPart(0.018, 0.028, 0.022, 0, -0.025, 0.045, metal));
+    this.gunGroup.add(mkPart(0.052, 0.055, 0.17, 0, 0.014, -0.1, body)); // barrel
+    this.gunGroup.add(mkPart(0.062, 0.07, 0.07, 0, 0.004, 0.015, body)); // breech
+    this.gunGroup.add(mkPart(0.034, 0.1, 0.045, 0, -0.058, 0.07, grip)); // grip
+    this.gunGroup.add(mkPart(0.02, 0.03, 0.024, 0, -0.024, 0.042, body)); // guard
     // Muzzle flash quad, hidden until it fires.
     const flashGeo = new THREE.PlaneGeometry(0.16, 0.16);
     flashGeo.setAttribute('color', new THREE.Float32BufferAttribute(new Array(flashGeo.attributes.position.count * 3).fill(1), 3));
     const flashMat = this.psx.createMaterial({
-      map: flatTexture('flash', PAL.amber),
+      map: flatTexture('flash', PAL.bloodLit),
       jitter: 0,
       affine: 0,
       emissive: 2.2,
@@ -281,8 +293,13 @@ export class Game {
     flash.visible = false;
     this.gunGroup.add(flash);
 
-    this.gunGroup.position.set(0.11, -0.085, -0.26);
-    this.gunGroup.rotation.y = -0.12;
+    // Held low and to the right, and small: a signal pistol is a stubby thing
+    // and at this overlay FOV the parts subtend far more than their size
+    // suggests.
+    this.gunGroup.scale.setScalar(0.46);
+    this.gunGroup.position.set(0.125, -0.085, -0.34);
+    this.gunGroup.rotation.y = -0.14;
+    this.gunGroup.rotation.z = 0.06;
     this.gunGroup.visible = false;
     this.overlayScene.add(this.gunGroup);
   }
@@ -373,13 +390,13 @@ export class Game {
       pos: new THREE.Vector3(cx(13), 1.0, lz(30) - 0.85),
       normal: new THREE.Vector3(0, 0, -1),
       radius: 3.2,
-      visible: () => run().progress.safeOpen && !run().progress.hasKey,
+      visible: () => run().progress.safeOpen && !run().progress.hasCabinetKey,
       ready: () => true,
-      label: () => 'Take the breaker cabinet key',
+      label: () => 'Take the steel cabinet key',
       activate: () => {
-        run().progress.hasKey = true;
+        run().progress.hasCabinetKey = true;
         this.audio.play('pickup');
-        this.hud.toast('Breaker cabinet key. Generator room, east wall.', 3.2);
+        this.hud.toast('Steel cabinet key. It opens the breaker cabinet in the generator hall.', 3.6);
         this.syncPropVisibility();
       },
     });
@@ -395,7 +412,7 @@ export class Game {
       label: () => {
         const p = run().progress;
         if (p.powerRestored) return 'The panel is live';
-        if (!p.hasKey) return 'Breaker cabinet (locked)';
+        if (!p.hasCabinetKey) return 'Breaker cabinet (needs the steel key)';
         if (!run().extractionLive) return 'Breaker cabinet (dead)';
         return 'Open the breaker cabinet';
       },
@@ -410,9 +427,14 @@ export class Game {
           this.hud.toast('Nothing in the cabinet is energised. Not yet.', 3.0);
           return;
         }
-        if (!p.hasKey) {
+        if (!p.hasCabinetKey) {
           this.audio.play('denied');
-          this.hud.toast('Keyed access only. The key is in the workshop safe.', 3.2);
+          this.hud.toast(
+            p.hasBoxKey
+              ? 'The brass key does not fit this. It needs the steel key from the workshop safe.'
+              : 'Keyed access only. The steel key is in the workshop safe.',
+            3.6,
+          );
           return;
         }
         this.openPuzzle('breaker', P.breakerAnchor.pos);
@@ -451,38 +473,158 @@ export class Game {
       },
     });
 
-    // ---- the footlocker the gun is in ------------------------------------
+    // ---- the flare gun ---------------------------------------------------
     list.push({
-      id: 'footlocker',
-      pos: P.footlockerAnchor.pos,
+      id: 'flare-gun',
+      pos: P.flareGunAnchor.pos,
       normal: null,
-      radius: 2.6,
-      visible: () => !run().progress.footlockerOpen,
+      radius: 2.8,
+      visible: () => !run().progress.hasFlareGun,
       ready: () => true,
-      label: () => 'Force the footlocker',
+      label: () => 'Take the signal pistol',
       activate: () => {
-        run().progress.footlockerOpen = true;
-        this.audio.play('clunk', P.footlockerAnchor.pos, 1.1);
-        this.audio.play('latch', P.footlockerAnchor.pos, 0.6);
-        this.hud.toast('The hasp gives. There is one weapon in it, and one round in that.', 4.5);
+        const p = run().progress;
+        p.hasFlareGun = true;
+        p.flares += FLARE_GUN_LOADED;
+        this.audio.play('pickup');
+        this.hud.toast(
+          'Signal pistol, loaded with one flare. Left click to fire. A flare lights a room, ' +
+            'and a flare in the thing itself will buy you a minute.',
+          6.5,
+        );
         this.syncPropVisibility();
       },
     });
 
-    // ---- the gun ---------------------------------------------------------
+    // ---- the three loose flares ------------------------------------------
+    for (const pickup of P.flarePickups) {
+      list.push({
+        id: pickup.id,
+        pos: pickup.pos,
+        normal: null,
+        radius: 2.6,
+        visible: () => !run().progress.flaresTaken.includes(pickup.id),
+        ready: () => true,
+        label: () => 'Take the flare',
+        activate: () => {
+          const p = run().progress;
+          if (p.flaresTaken.includes(pickup.id)) return;
+          p.flaresTaken.push(pickup.id);
+          p.flares += 1;
+          this.audio.play('pickup');
+          this.hud.toast(
+            p.hasFlareGun
+              ? `Flare. ${p.flares} in hand.`
+              : 'A flare cartridge. No use without the pistol it goes in.',
+            3.0,
+          );
+          this.syncPropVisibility();
+        },
+      });
+    }
+
+    // ---- the brass key, for the personal box -----------------------------
     list.push({
-      id: 'gun',
-      pos: P.gunAnchor.pos,
+      id: 'box-key',
+      pos: P.boxKeyAnchor.pos,
+      normal: null,
+      radius: 2.6,
+      visible: () => !run().progress.hasBoxKey,
+      ready: () => true,
+      label: () => 'Take the brass key',
+      activate: () => {
+        run().progress.hasBoxKey = true;
+        this.audio.play('pickup');
+        this.hud.toast("Small brass key. Too small for anything on a door. Someone's own lock.", 4.2);
+        this.syncPropVisibility();
+      },
+    });
+
+    // ---- Harding's personal box -------------------------------------------
+    list.push({
+      id: 'personal-box',
+      pos: P.personalBoxAnchor.pos,
       normal: null,
       radius: 2.8,
-      visible: () => run().progress.footlockerOpen && !run().progress.hasGun,
-      ready: () => true,
-      label: () => 'Take the gun',
+      visible: () => !run().progress.personalBoxOpen,
+      ready: () => run().progress.hasBoxKey,
+      label: () =>
+        run().progress.hasBoxKey ? 'Unlock the personal box' : 'Personal box (locked)',
       activate: () => {
-        run().progress.hasGun = true;
-        this.audio.play('pickup');
-        this.hud.toast('One round in the cylinder. One. Left click to fire.', 4.0);
+        const p = run().progress;
+        if (!p.hasBoxKey) {
+          this.audio.play('denied');
+          this.openReadableCustom('personal-box', "PERSONAL BOX - R. HARDING", [
+            'A steel deed box, bolted to the shelf, with a small brass lock on',
+            'the front. The kind of lock that is there to stop colleagues, not',
+            'thieves - and you do not have anything small enough to turn it.',
+            '',
+            'Something shifts inside when you tilt it. Not papers. Something',
+            'with weight and edges.',
+            '',
+            'The tag on the lid reads R. HARDING.',
+          ]);
+          return;
+        }
+        p.personalBoxOpen = true;
+        this.audio.play('latch', P.personalBoxAnchor.pos, 0.9);
+        this.hud.toast('The brass key turns. There is a crucifix inside, wrapped in a shirt.', 4.5);
         this.syncPropVisibility();
+      },
+    });
+
+    // ---- the cross -------------------------------------------------------
+    list.push({
+      id: 'cross',
+      pos: P.crossAnchor.pos,
+      normal: null,
+      radius: 2.6,
+      // Collectable exactly once: gone from the box, and gone for good once
+      // it has been placed in the seal.
+      visible: () =>
+        run().progress.personalBoxOpen && !run().progress.hasCross && !run().progress.crossPlaced,
+      ready: () => true,
+      label: () => 'Take the crucifix',
+      activate: () => {
+        const p = run().progress;
+        if (p.hasCross || p.crossPlaced) return;
+        p.hasCross = true;
+        this.audio.play('pickup');
+        this.hud.toast('A heavy brass crucifix. Consecrated, by the look of the wear on it.', 4.2);
+        this.syncPropVisibility();
+      },
+    });
+
+    // ---- the seal in the sealed store ------------------------------------
+    list.push({
+      id: 'pentagram',
+      pos: P.pentagramAnchor.pos,
+      normal: null,
+      radius: 3.2,
+      visible: () => !run().progress.crossPlaced,
+      ready: () => run().progress.hasCross,
+      label: () => (run().progress.hasCross ? 'Place the cross in the seal' : 'Examine the seal'),
+      activate: () => {
+        if (run().progress.crossPlaced) return;
+        if (!run().progress.hasCross) {
+          run().progress.pentagramInspected = true;
+          this.audio.play('beep');
+          this.openReadableCustom('pentagram', 'THE SEAL', [
+            'A pentagram, cut into the concrete floor rather than painted on',
+            'it, inside a double ring. The cuts are packed with something dark',
+            'that has not dried in however many years it has been down here,',
+            'and it is putting out a faint red light of its own.',
+            '',
+            'Nothing is written in it. Nothing is burning in it. It is not',
+            'doing anything at all.',
+            '',
+            'There is a clean space in the middle of the star, about the size',
+            'of two hands, worn smoother than the rest of the floor - as if',
+            'something was meant to be set down there and never was.',
+          ]);
+          return;
+        }
+        this.openRitualDecision();
       },
     });
 
@@ -500,6 +642,7 @@ export class Game {
       });
     }
 
+    // ---- ordinary readables from the props pass -------------------------
     // ---- ordinary readables from the props pass -------------------------
     for (const r of this.props.readables) {
       list.push({
@@ -718,6 +861,101 @@ export class Game {
     this.hud.toast('It comes out of the cradle easily. Somewhere under the floor, something shifts.', 5.0);
   }
 
+  // ================================================================== ritual
+
+  /** Offer to place the cross. A decision, like the diamond, not a reflex. */
+  private openRitualDecision(): void {
+    if (this.run.progress.crossPlaced) return;
+    this.phase = 'menu';
+    this.input.gameplayEnabled = false;
+    this.input.releaseAll();
+    this.screens.show(() =>
+      ritualDecisionScreen({
+        onPlace: () => this.performRitual(),
+        onBack: () => this.resumeFromMenu(),
+      }),
+    );
+  }
+
+  /**
+   * Place the cross and resolve the ritual. Permanent, and exactly once.
+   *
+   * Has to work from every state the demon can be in when the player gets
+   * here: hunting, suspended behind a device panel, burning, already absent on
+   * a flare budget, or not yet released at all because the diamond is still on
+   * its pedestal. The last case is deferred to the reveal - see
+   * `playReveal` - so the stone still has to be lifted for the ritual to
+   * mean anything.
+   */
+  private performRitual(): void {
+    const p = this.run.progress;
+    if (p.crossPlaced) return;
+    p.crossPlaced = true;
+    p.hasCross = false;
+    this.screens.close();
+    this.syncPropVisibility();
+
+    this.phase = 'play';
+    this.input.gameplayEnabled = true;
+    this.input.releaseAll();
+
+    // Nothing can touch the player while this plays out.
+    this.ritualTimer = RITUAL_SECONDS;
+    this.player.controlLocked = true;
+    this.player.lockViewTo(this.props.pentagramAnchor.pos);
+    this.demon.suspend();
+    this.audio.play('ritual', this.props.pentagramAnchor.pos, 1);
+
+    if (!p.diamondTaken) {
+      // The thing is not out yet. The seal is armed and will take it the
+      // moment lifting the stone lets it loose.
+      this.hud.toast(
+        'The crucifix settles into the worn patch and the cuts in the floor go bright. ' +
+          'Whatever this is waiting for, it has not arrived yet.',
+        6.5,
+      );
+      return;
+    }
+    this.hud.toast('The crucifix settles into the worn patch. The floor takes a breath in.', 5.0);
+  }
+
+  /** The moment the ritual actually ends the demon. Idempotent. */
+  private resolveRitualKill(): void {
+    const p = this.run.progress;
+    if (p.ritualDone) return;
+    p.ritualDone = true;
+    // Any pending flare-suppression return is cancelled: it is not coming back.
+    p.demonAbsence = 0;
+    p.demonDead = true;
+    this.demon.resume(0);
+    this.demon.kill();
+    this.audio.play('demon_die', this.demon.centre, 1);
+    this.audio.play('ritual', this.props.pentagramAnchor.pos, 0.8);
+    this.audio.setHeartbeat(0);
+    this.hud.toast(
+      'It is dragged down into the lines in the floor, and the light in the cuts goes out behind it.',
+      6.5,
+    );
+  }
+
+  /** Runs the protected ritual window, then resolves the kill. */
+  private tickRitual(dt: number): void {
+    if (this.ritualTimer <= 0) return;
+    this.ritualTimer -= dt;
+    this.psx.setFade(Math.min(0.75, (RITUAL_SECONDS - this.ritualTimer) * 0.5), 0xa8181c);
+    if (this.ritualTimer > 0) return;
+    this.psx.setFade(0);
+    this.player.controlLocked = false;
+    this.player.releaseView();
+    // If the demon is out, this is where it dies. If it is not out yet, the
+    // seal stays armed and the reveal resolves it.
+    if (this.run.progress.diamondTaken && this.demon.state !== 'dormant') {
+      this.resolveRitualKill();
+    } else {
+      this.demon.resume(PUZZLE_GRACE);
+    }
+  }
+
   // ================================================================== hiding
 
   /**
@@ -874,13 +1112,20 @@ export class Game {
   private syncPropVisibility(): void {
     const p = this.run.progress;
     this.props.diamondMesh.visible = !p.diamondTaken;
-    this.props.gunMesh.visible = p.footlockerOpen && !p.hasGun;
-    // Lid swings up and back when the locker is forced.
-    this.props.footlockerLid.rotation.x = p.footlockerOpen ? -1.9 : 0;
-    this.props.keyMesh.visible = p.safeOpen && !p.hasKey;
+    this.props.flareGunMesh.visible = !p.hasFlareGun;
+    for (const pickup of this.props.flarePickups) {
+      pickup.mesh.visible = !p.flaresTaken.includes(pickup.id);
+    }
+    this.props.boxKeyMesh.visible = !p.hasBoxKey;
+    // Lid swings up and back when the box is unlocked.
+    this.props.personalBoxLid.rotation.x = p.personalBoxOpen ? -1.9 : 0;
+    this.props.crossMesh.visible = p.personalBoxOpen && !p.hasCross && !p.crossPlaced;
+    this.props.pentagram.visible = true;
+    this.props.placedCross.visible = p.crossPlaced;
+    this.props.keyMesh.visible = p.safeOpen && !p.hasCabinetKey;
     this.props.safeDoor.visible = !p.safeOpen;
-    this.props.breakerDoor.visible = !p.hasKey;
-    this.gunGroup.visible = p.hasGun;
+    this.props.breakerDoor.visible = !p.hasCabinetKey;
+    this.gunGroup.visible = p.hasFlareGun;
     const flash = this.gunGroup.getObjectByName('muzzleflash');
     if (flash) flash.visible = false;
 
@@ -945,6 +1190,20 @@ export class Game {
       this.demon.update(d, this.grid, this.player, this.loudThisTick, this.player.hidden);
     }
 
+    // Active-gameplay clocks. Deliberately not ticked in menus, endings or
+    // the death screen, and the suppression clock additionally stops while a
+    // device panel has the demon suspended.
+    if (this.phase === 'play' || this.phase === 'reading') {
+      this.flares.update(d, this.player.camera.position, this.demon.group.visible ? this.demon.centre : null);
+      this.tickDemonAbsence(d);
+      this.tickRitual(d);
+    } else if (this.phase === 'puzzle') {
+      // Flares keep burning while a panel is open, but the demon's return
+      // clock does not: the brief requires a puzzle interaction to pause it.
+      this.flares.update(d, this.player.camera.position, null);
+      this.tickRitual(d);
+    }
+
     if (this.phase === 'play' || this.phase === 'reading') {
       this.checkReveal(d);
       this.checkThreshold();
@@ -994,29 +1253,104 @@ export class Game {
 
   fire(): void {
     const p = this.run.progress;
-    if (!p.hasGun) return;
-    if (p.roundSpent) {
+    if (!p.hasFlareGun) return;
+    if (p.flares <= 0) {
       this.audio.play('dryfire');
-      this.hud.toast('Empty. There was only ever one round.', 2.4);
+      this.hud.toast('Empty. Nothing left to load.', 2.4);
       return;
     }
-    p.roundSpent = true;
+    p.flares -= 1;
+    p.flaresFired += 1;
     this.gunRecoil = 1;
     this.loudThisTick = true;
-    this.audio.play('gunshot', undefined, 1);
+    this.audio.play('flare_fire', undefined, 1);
     const flash = this.gunGroup.getObjectByName('muzzleflash');
     if (flash) flash.visible = true;
 
+    // Judge the shot once, here, against what the player had down the sights.
     const hit = this.shotHitsDemon();
+    const dir = this.player.forward.clone().normalize();
+    this.flares.onIgniteDemon = hit ? () => this.igniteDemon() : null;
+    this.flares.fire(this.player.camera.position, dir, hit, hit ? this.demon.centre : null);
+
     if (hit) {
-      this.demon.kill();
-      this.audio.play('hit', this.demon.centre, 1);
-      this.audio.play('demon_die', this.demon.centre, 1);
-      this.audio.setHeartbeat(0);
-      this.hud.toast('It folds up and goes down, and the knocking in the walls stops.', 5.0);
+      this.hud.toast('A hit. It goes up like a dry hedge.', 4.0);
     } else {
-      this.hud.toast('The round goes somewhere into the dark. That was the only one.', 4.5);
+      this.hud.toast(
+        p.flares > 0
+          ? `The flare skids off down the corridor, burning. ${p.flares} left.`
+          : 'The flare skids off down the corridor, burning. That was the last one.',
+        4.0,
+      );
     }
+  }
+
+  /**
+   * A flare has landed in the demon. It burns, screams, and goes off the board
+   * for a fixed budget of *active* gameplay seconds - not wall-clock, and not
+   * counted while a panel has it suspended or the game is paused.
+   *
+   * This is relief, not a kill. Only the ritual is permanent.
+   */
+  private igniteDemon(): void {
+    if (!this.demon.alive || this.demon.state === 'dormant') return;
+    if (this.run.progress.ritualDone) return;
+    const at = this.demon.centre;
+    this.run.progress.demonAbsence = FLARE_SUPPRESSION_SECONDS;
+    this.demon.ignite();
+    this.audio.play('demon_ignite', at, 1);
+    this.audio.play('scream', at, 1);
+    this.audio.setHeartbeat(0);
+    this.hud.toast(
+      'It burns. It goes through the wall still burning, and the sound of it moves away under the floor.',
+      6.0,
+    );
+  }
+
+  /**
+   * Burn down the suppression budget and bring the demon back. Called only
+   * with active-gameplay dt, so pausing or opening a panel stops the clock.
+   */
+  private tickDemonAbsence(dt: number): void {
+    const p = this.run.progress;
+    if (p.ritualDone || p.demonAbsence <= 0) return;
+    const before = p.demonAbsence;
+    p.demonAbsence = Math.max(0, p.demonAbsence - dt);
+
+    // One audible warning before it is back on the board.
+    if (before > 6 && p.demonAbsence <= 6) {
+      this.audio.play('rumble', undefined, 0.8);
+      this.hud.toast('Somewhere a long way off, something starts moving again.', 4.0);
+    }
+    if (p.demonAbsence > 0) return;
+
+    const spot = this.pickReturnPoint();
+    this.demon.returnFromBurn(spot.gx, spot.gz, this.player.x, this.player.z);
+    this.audio.play('roar', this.demon.centre, 0.95);
+    this.hud.toast('It is back, and it is not burning any more.', 4.0);
+  }
+
+  /**
+   * Somewhere out of the player's lap and out of their sight: a patrol node
+   * that is far enough away and has no line of sight to the player.
+   */
+  private pickReturnPoint(): { gx: number; gz: number } {
+    let best: { gx: number; gz: number } | null = null;
+    let bestScore = -Infinity;
+    for (const [gx, gz] of PATROL) {
+      const wx = cx(gx);
+      const wz = cz(gz);
+      const d = Math.hypot(wx - this.player.x, wz - this.player.z);
+      if (d < 18) continue; // not in the player's immediate vicinity
+      const seen = this.grid.sightClear(this.player.x, this.player.z, wx, wz);
+      // Prefer out of sight, then moderate distance over the far side of the map.
+      const score = (seen ? -1000 : 0) - Math.abs(d - 30);
+      if (score > bestScore) {
+        bestScore = score;
+        best = { gx, gz };
+      }
+    }
+    return best ?? { gx: PATROL[0][0], gz: PATROL[0][1] };
   }
 
   /** Reliable hit check: ray against the demon's body capsule, plus sight. */
@@ -1061,6 +1395,18 @@ export class Game {
     if (p.revealPlayed) return;
     p.revealPlayed = true;
     this.demon.spawnReveal(REVEAL.demonCell[0], REVEAL.demonCell[1], REVEAL.holdTime, this.player.x, this.player.z);
+    if (p.crossPlaced && !p.ritualDone) {
+      // The seal was armed before the stone was lifted. It appears, and the
+      // floor takes it immediately - same permanent outcome, staged here.
+      this.audio.play('scream', this.demon.centre, 1);
+      this.resolveRitualKill();
+      this.hud.toast(
+        'It comes up out of the dark at the end of the tunnel, and the seal you armed takes it ' +
+          'before it reaches you.',
+        7.0,
+      );
+      return;
+    }
     this.audio.play('scream', this.demon.centre, 1);
     this.audio.play('rumble', undefined, 1);
     this.hud.toast(
@@ -1078,7 +1424,9 @@ export class Game {
     if (!p.doorUnlocked) return;
     if (this.player.z < FRONT_DOOR.thresholdZ) return;
     if (!p.diamondTaken) return;
-    this.finishEnding(this.demon.alive && this.demon.state !== 'dormant' ? 'bad' : 'good');
+    // Permanent death is the ritual and only the ritual. A demon that is
+    // merely absent on a flare budget is still alive, so this is a Bad Ending.
+    this.finishEnding(this.run.demonPermanentlyDead ? 'good' : 'bad');
   }
 
   private checkSecretRoom(): void {
@@ -1205,7 +1553,7 @@ export class Game {
       return;
     }
     const p = this.run.progress;
-    this.hud.setAiming(p.hasGun && !p.roundSpent);
+    this.hud.setAiming(p.hasFlareGun && p.flares > 0);
     if (this.player.hidden) {
       this.hud.setPrompt('Come out', 'E');
       this.hud.setInventory(this.inventoryLines());
@@ -1233,13 +1581,17 @@ export class Game {
     const p = this.run.progress;
     const lines: Array<{ cls: string; mark: string; text: string }> = [];
     if (p.diamondTaken) lines.push({ cls: 'diamond', mark: '[*]', text: 'blue diamond' });
-    if (p.hasKey) lines.push({ cls: 'key', mark: '[-]', text: 'breaker cabinet key' });
-    if (p.hasGun) {
+    if (p.hasCabinetKey) lines.push({ cls: 'key', mark: '[=]', text: 'steel key - breaker cabinet' });
+    if (p.hasBoxKey) lines.push({ cls: 'key', mark: '[-]', text: 'brass key - personal box' });
+    if (p.hasCross) lines.push({ cls: 'cross', mark: '[+]', text: 'brass crucifix' });
+    if (p.hasFlareGun) {
       lines.push(
-        p.roundSpent
-          ? { cls: 'gun spent', mark: '[ ]', text: 'gun - empty' }
-          : { cls: 'gun', mark: '[1]', text: 'gun - one round' },
+        p.flares > 0
+          ? { cls: 'gun', mark: `[${p.flares}]`, text: p.flares === 1 ? 'signal pistol - 1 flare' : `signal pistol - ${p.flares} flares` }
+          : { cls: 'gun spent', mark: '[ ]', text: 'signal pistol - empty' },
       );
+    } else if (p.flares > 0) {
+      lines.push({ cls: 'gun spent', mark: `[${p.flares}]`, text: 'flares - no pistol' });
     }
     if (p.cluesFound.length > 0) {
       lines.push({ cls: 'clues', mark: `[${p.cluesFound.length}]`, text: 'of 4 wall letters (TAB)' });
@@ -1249,6 +1601,15 @@ export class Game {
 
   /** Directional demon cue: a marker at the screen edge plus the threat text. */
   private updateThreatCue(): void {
+    // Burned off and counting down: say so, and say roughly how long is left,
+    // because spending a flare is a tactical decision and the player has to be
+    // able to plan around what they bought.
+    if (this.run.demonSuppressed) {
+      this.hud.setThreat(0, null);
+      this.hud.setThreatText(`BURNING SOMEWHERE - ${Math.ceil(this.run.progress.demonAbsence)}`);
+      return;
+    }
+    this.hud.setThreatText(null);
     if (!this.demon.alive || this.demon.state === 'dormant') {
       this.hud.setThreat(0, null);
       return;
@@ -1338,13 +1699,26 @@ export class Game {
         halo.rotation.z = 0;
       }
     }
-    if (this.props.gunMesh.visible) {
-      this.props.gunMesh.rotation.y += dt * 0.5;
-      const glint = (this.props.gunMesh.userData as { glint?: THREE.Mesh }).glint;
+    // Pickups turn slowly and their glints face the camera.
+    for (const grp of [
+      this.props.flareGunMesh,
+      this.props.boxKeyMesh,
+      this.props.crossMesh,
+      ...this.props.flarePickups.map((f) => f.mesh),
+    ]) {
+      if (!grp.visible) continue;
+      grp.rotation.y += dt * 0.5;
+      const glint = (grp.userData as { glint?: THREE.Mesh }).glint;
       if (glint) {
         glint.lookAt(this.player.camera.position);
         glint.rotation.z = 0;
       }
+    }
+    // The seal's haze faces the camera too.
+    const haze = (this.props.pentagram.userData as { haze?: THREE.Mesh }).haze;
+    if (haze) {
+      haze.lookAt(this.player.camera.position);
+      haze.rotation.z = 0;
     }
 
     // Gun viewmodel sway and recoil.
@@ -1352,9 +1726,9 @@ export class Game {
       const sway = Math.sin(this.time * 2.2) * 0.004;
       const bob = Math.min(1, this.player.speed / 4.3);
       this.gunGroup.position.set(
-        0.11 + sway,
+        0.125 + sway,
         -0.085 + Math.sin(this.time * 7) * 0.004 * bob + this.gunRecoil * 0.02,
-        -0.26 + this.gunRecoil * 0.05,
+        -0.34 + this.gunRecoil * 0.05,
       );
       this.gunGroup.rotation.x = -this.gunRecoil * 0.4;
       if (this.gunRecoil > 0) this.gunRecoil = Math.max(0, this.gunRecoil - dt * 3.2);
@@ -1509,6 +1883,53 @@ export class Game {
         this.step(1 / 60);
       },
       playReveal: () => this.playReveal(),
+      flareState: () => ({
+        hasGun: this.run.progress.hasFlareGun,
+        flares: this.run.progress.flares,
+        fired: this.run.progress.flaresFired,
+        taken: [...this.run.progress.flaresTaken],
+        burning: this.flares.burningCount,
+        active: this.flares.activeCount,
+      }),
+      ritualState: () => ({
+        hasBoxKey: this.run.progress.hasBoxKey,
+        boxOpen: this.run.progress.personalBoxOpen,
+        hasCross: this.run.progress.hasCross,
+        crossPlaced: this.run.progress.crossPlaced,
+        ritualDone: this.run.progress.ritualDone,
+        pentagramInspected: this.run.progress.pentagramInspected,
+        permanentlyDead: this.run.demonPermanentlyDead,
+        suppressed: this.run.demonSuppressed,
+        absence: this.run.progress.demonAbsence,
+      }),
+      /** Aim at the demon and fire for real, through the normal fire path. */
+      fireAtDemon: () => {
+        const dx = this.demon.x - this.player.x;
+        const dz = this.demon.z - this.player.z;
+        this.player.yaw = Math.atan2(dx, dz);
+        const dy = 1.45 - this.player.eyeY;
+        this.player.pitch = Math.atan2(dy, Math.hypot(dx, dz));
+        this.step(1 / 60);
+        this.fire();
+        // Let the projectile reach it.
+        for (let i = 0; i < 90; i++) this.step(1 / 60);
+      },
+      /**
+       * Light sampled at a point. `withFlares` includes burning flares, so a
+       * test can compare the same point lit and unlit and prove a flare is
+       * doing something.
+       */
+      lightAt: (x: number, y: number, z: number, withFlares = true) => {
+        const c = new THREE.Color();
+        this.world.sampleLight(x, y, z, c);
+        if (withFlares) this.flares.sample(x, y, z, c);
+        return { r: c.r, g: c.g, b: c.b, sum: c.r + c.g + c.b };
+      },
+      /** Where the burning flares actually are. */
+      flarePositions: () => {
+        const p = this.flares.brightest();
+        return p ? [{ x: p.x, y: p.y, z: p.z }] : [];
+      },
       hideSpots: () =>
         this.props.hideSpots.map((h) => ({ id: h.id, kind: h.kind, x: h.pos.x, z: h.pos.z, label: h.label })),
       enterHide: (id: string) => this.enterHide(id),
@@ -1537,6 +1958,7 @@ export class Game {
         connected: connectedFromStart(this.grid),
       }),
       pathExists: (ax: number, az: number, bx: number, bz: number) => !!this.grid.findPath(ax, az, bx, bz),
+      sightClear: (ax: number, az: number, bx: number, bz: number) => this.grid.sightClear(ax, az, bx, bz),
       /** Walking distance along the real path between two points, in units. */
       pathLength: (ax: number, az: number, bx: number, bz: number) => {
         const p = this.grid.findPath(ax, az, bx, bz);

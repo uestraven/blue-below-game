@@ -31,7 +31,10 @@ export type SfxName =
   | 'rumble'
   | 'drip'
   | 'rat'
-  | 'draught';
+  | 'draught'
+  | 'flare_fire'
+  | 'demon_ignite'
+  | 'ritual';
 
 interface Vec3 {
   x: number;
@@ -422,6 +425,28 @@ export class AudioEngine {
         break;
       case 'rat':
         this.noiseBurst(dest, t, 0.12, 4200, 5, 0.1 * gain, 'highpass');
+        break;
+      case 'flare_fire':
+        // A hollow thump and a hiss, not a gunshot.
+        this.tone(dest, t, 'square', 320, 90, 0.4 * gain, 0.12);
+        this.noiseBurst(dest, t, 0.1, 1800, 1.4, 0.5 * gain, 'lowpass');
+        this.noiseBurst(dest, t + 0.05, 1.1, 3200, 0.8, 0.16 * gain, 'highpass');
+        break;
+      case 'demon_ignite':
+        // Ignition, then something large going away at speed.
+        this.noiseBurst(dest, t, 0.35, 900, 0.9, 0.7 * gain, 'lowpass');
+        this.noiseBurst(dest, t + 0.1, 2.2, 2600, 0.7, 0.3 * gain, 'highpass');
+        this.tone(dest, t, 'sawtooth', 240, 40, 0.5 * gain, 1.6);
+        this.tone(dest, t + 0.4, 'sawtooth', 120, 28, 0.3 * gain, 1.8);
+        break;
+      case 'ritual':
+        // Low swell, a struck bell, and the floor taking something back.
+        this.tone(dest, t, 'sine', 48, 36, 0.5 * gain, 2.8);
+        for (let i = 0; i < 5; i++) {
+          this.tone(dest, t + 0.1 + i * 0.13, 'sine', 660 + i * 180, 620 + i * 160, 0.12 * gain, 1.4);
+        }
+        this.noiseBurst(dest, t + 0.5, 2.4, 300, 1.0, 0.3 * gain, 'lowpass');
+        this.tone(dest, t + 1.1, 'sawtooth', 90, 20, 0.4 * gain, 2.2);
         break;
       case 'draught':
         // Air pulling through a gap in masonry. The only cue that the false

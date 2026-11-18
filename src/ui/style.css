@@ -211,6 +211,10 @@ body {
   opacity: 1;
 }
 
+.hud-threat.burning {
+  color: var(--amber);
+}
+
 /* Directional demon indicator: a thin arc at the screen edge. */
 .hud-dir {
   position: absolute;
