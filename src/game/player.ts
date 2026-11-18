@@ -27,8 +27,8 @@ export const SPRINT_SPEED = 6.6;
  */
 const ACCEL_TIME = 0.085;
 const DECEL_TIME = 0.065;
-const STAMINA_DRAIN = 0.225;
-const STAMINA_REGEN = 0.16;
+export const STAMINA_DRAIN = 0.225;
+export const STAMINA_REGEN = 0.16;
 const PITCH_LIMIT = Math.PI / 2 - 0.08;
 
 export class Player {

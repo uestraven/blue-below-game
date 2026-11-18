@@ -27,19 +27,23 @@ const SPEED_INVESTIGATE = 3.2;
 /**
  * Chase speed, and the most important number in the game.
  *
- * It sits marginally *below* the player's walk (4.3), so a player who reacts
- * and simply moves away gains about 0.2 u/s - slow enough that they have to
- * keep going, fast enough that reacting is what saves them. Sprinting opens
- * the gap decisively at +2.5 u/s.
+ * It sits deliberately *above* the player's walk (4.3) and below their sprint
+ * (6.6). Walking away loses about 0.7 u/s, so noticing it is not enough on its
+ * own: the escape is to sprint, round a corner, and let it lose you, which is
+ * what the 5 s memory and 13 s search exist for. Stamina is therefore a real
+ * resource and running out of it is genuinely dangerous.
  *
- * It was 5.0, above the walk, which meant walking away lost ground and the
- * only escape was precise sprint-stamina management. That made the chase
- * punish players who did the right thing a beat too slowly rather than players
- * who did the wrong thing, and it is why it is now a shade slower than you are.
+ * This was briefly dropped to 4.1 - below the walk - after a playtester could
+ * not escape. The actual fault was that they never knew sprinting existed: the
+ * stamina bar only appeared once you were already sprinting, so the one piece
+ * of UI advertising the mechanic was hidden behind using the mechanic. Fixing
+ * the discoverability was the right fix; slowing the demon just made sprint
+ * and stamina pointless.
  *
- * Keep this below `WALK_SPEED` in player.ts. Route 14 asserts the relationship.
+ * Keep this between `WALK_SPEED` and `SPRINT_SPEED` in player.ts. Route 14
+ * asserts that ordering so it cannot drift.
  */
-export const SPEED_CHASE = 4.1;
+export const SPEED_CHASE = 5.0;
 const SIGHT_RANGE = 34;
 const SIGHT_HALF_ANGLE = Math.cos(THREE.MathUtils.degToRad(55));
 const CATCH_DISTANCE = 1.55;

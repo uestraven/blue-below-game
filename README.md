@@ -168,10 +168,12 @@ entirely. Hiding does not: the world keeps running and it keeps hunting, so it
 comes to where it last saw you, searches, and eventually wanders off. You just
 stop being something it can find.
 
-**On outrunning it.** It chases at 4.1 units/second, you walk at 4.3 and sprint
-at 6.6. Noticing it and moving away is enough to get clear — barely, so you
-have to keep going. Sprinting settles it quickly but is finite and is the
-loudest thing you can do. Standing still is what gets you killed.
+**On outrunning it.** It chases at 5.0 units/second, you walk at 4.3 and sprint
+at 6.6. Walking away loses ground, so noticing it is not enough on its own: you
+sprint, round a corner, and let it lose you. One full stamina bar is about 4.4
+seconds of sprint — enough to get round a corner and not much more. Sprinting is
+also the loudest thing you can do, so it hears you from twice as far. Standing
+still beside it is what gets you killed.
 
 - **Bad Ending** — cross the threshold with the stone while it is alive.
 - **Good Ending** — cross the threshold with the stone after killing it.

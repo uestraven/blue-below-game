@@ -161,11 +161,26 @@ body {
 .hud-stamina {
   position: absolute;
   right: 22px;
-  bottom: 20px;
+  bottom: 34px;
   width: 128px;
   height: 7px;
   border: 1px solid var(--steel);
   background: rgba(7, 10, 16, 0.7);
+}
+
+.hud-stamina > b {
+  position: absolute;
+  right: 0;
+  top: 10px;
+  font-size: 10px;
+  font-weight: normal;
+  letter-spacing: 0.22em;
+  color: var(--grey);
+  text-shadow: 0 1px 0 #000;
+}
+
+.hud-stamina.low > b {
+  color: var(--blood-lit);
 }
 
 .hud-stamina > i {
@@ -182,7 +197,7 @@ body {
 .hud-threat {
   position: absolute;
   right: 22px;
-  bottom: 36px;
+  bottom: 52px;
   width: 128px;
   text-align: right;
   font-size: 11px;

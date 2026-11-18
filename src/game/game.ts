@@ -29,7 +29,15 @@ import {
 } from '../world/layout';
 import { SURFACE, flatTexture } from '../world/textures';
 import { PAL } from '../world/palette';
-import { Player, EYE_HEIGHT, PLAYER_RADIUS, WALK_SPEED, SPRINT_SPEED } from './player';
+import {
+  Player,
+  EYE_HEIGHT,
+  PLAYER_RADIUS,
+  WALK_SPEED,
+  SPRINT_SPEED,
+  STAMINA_DRAIN,
+  STAMINA_REGEN,
+} from './player';
 import { Demon, DEMON_RADIUS, SPEED_CHASE } from './demon';
 import { RunState } from './state';
 import { Hud } from '../ui/hud';
@@ -99,6 +107,14 @@ export class Game {
   private gunRecoil = 0;
   private knockTimer = 18;
   private draughtTimer = 1;
+  /**
+   * Counts down while the player has never sprinted. Sprinting is the single
+   * most important verb in a chase and the first playtester did not know it
+   * existed, so it gets taught in the safe part of the game and again at the
+   * exact moment it matters.
+   */
+  private sprintHintTimer = 24;
+  private sprintTaught = false;
   private revealClock = 0;
   private endingFade = 0;
   private deathFade = 0;
@@ -167,7 +183,7 @@ export class Game {
     this.demon.onCatch = () => this.onCaught();
     this.demon.onSpot = () => {
       this.audio.play('roar', this.demon.centre, 0.9);
-      this.hud.toast('It has seen you.', 2.0);
+      this.hud.toast(this.sprintTaught ? 'It has seen you.' : 'It has seen you. HOLD SHIFT TO RUN.', 2.6);
     };
 
     this.puzzles = new PuzzleHost(this.uiRoot, this.run, {
@@ -204,7 +220,7 @@ export class Game {
     this.demon.onCatch = () => this.onCaught();
     this.demon.onSpot = () => {
       this.audio.play('roar', this.demon.centre, 0.9);
-      this.hud.toast('It has seen you.', 2.0);
+      this.hud.toast(this.sprintTaught ? 'It has seen you.' : 'It has seen you. HOLD SHIFT TO RUN.', 2.6);
     };
     this.puzzles = new PuzzleHost(this.uiRoot, this.run, {
       onClose: () => this.closePuzzle(),
@@ -577,7 +593,8 @@ export class Game {
     this.input.requestCapture();
     this.audio.start();
     this.applySettings();
-    this.hud.toast('Have a look at the front door before you go anywhere.', 5.0);
+    this.hud.toast('Have a look at the front door before you go anywhere. Hold SHIFT to run.', 6.0);
+    this.sprintHintTimer = 24;
   }
 
   private openPause(): void {
@@ -935,6 +952,7 @@ export class Game {
       this.autoDiscoverClues();
       this.ambientKnocks(d);
       this.draughtCue(d);
+      this.teachSprint(d);
     }
 
     if (this.phase === 'reading') this.checkReadingInterrupt();
@@ -1046,7 +1064,9 @@ export class Game {
     this.audio.play('scream', this.demon.centre, 1);
     this.audio.play('rumble', undefined, 1);
     this.hud.toast(
-      'Something is standing at the far end of the tunnel. Somewhere below, a bus closes - the building has power again.',
+      this.sprintTaught
+        ? 'Something is standing at the far end of the tunnel. Somewhere below, a bus closes - the building has power again.'
+        : 'Something is standing at the far end of the tunnel. HOLD SHIFT TO RUN.',
       6.0,
     );
   }
@@ -1108,6 +1128,20 @@ export class Game {
     }
     this.draughtTimer = 3.4 + Math.random() * 2.6;
     this.audio.play('draught', { x: fx, y: 1.4, z: fz }, 1 - d / 14);
+  }
+
+  /** Teach sprinting before it is needed, and stop as soon as it is used. */
+  private teachSprint(dt: number): void {
+    if (this.sprintTaught) return;
+    if (this.player.sprinting) {
+      this.sprintTaught = true;
+      this.sprintHintTimer = Infinity;
+      return;
+    }
+    this.sprintHintTimer -= dt;
+    if (this.sprintHintTimer > 0) return;
+    this.sprintHintTimer = 50;
+    this.hud.toast('Hold SHIFT to run. The bar at the bottom right is how much running you have left.', 5.5);
   }
 
   private ambientKnocks(dt: number): void {
@@ -1175,7 +1209,7 @@ export class Game {
     if (this.player.hidden) {
       this.hud.setPrompt('Come out', 'E');
       this.hud.setInventory(this.inventoryLines());
-      this.hud.setStamina(this.player.stamina, this.player.stamina < 0.999);
+      this.hud.setStamina(this.player.stamina, true);
       this.updateThreatCue();
       return;
     }
@@ -1190,7 +1224,7 @@ export class Game {
     }
 
     this.hud.setInventory(this.inventoryLines());
-    this.hud.setStamina(this.player.stamina, this.player.stamina < 0.999 || this.player.sprinting);
+    this.hud.setStamina(this.player.stamina, true);
 
     this.updateThreatCue();
   }
@@ -1515,7 +1549,13 @@ export class Game {
       thresholdZ: () => FRONT_DOOR.thresholdZ,
       playerEyeY: () => this.player.camera.position.y,
       /** The chase-balance numbers, so a test can assert the relationship. */
-      tuning: () => ({ walk: WALK_SPEED, sprint: SPRINT_SPEED, chase: SPEED_CHASE }),
+      tuning: () => ({
+        walk: WALK_SPEED,
+        sprint: SPRINT_SPEED,
+        chase: SPEED_CHASE,
+        staminaDrain: STAMINA_DRAIN,
+        staminaRegen: STAMINA_REGEN,
+      }),
       /** Put the demon in a chase on the player, for balance tests. */
       forceChase: () => {
         this.run.progress.diamondTaken = true;

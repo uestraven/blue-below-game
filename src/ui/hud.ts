@@ -38,6 +38,9 @@ export class Hud {
     this.stamina = div('hud-stamina');
     this.staminaFill = document.createElement('i');
     this.stamina.appendChild(this.staminaFill);
+    const staminaLabel = document.createElement('b');
+    staminaLabel.textContent = 'SHIFT  RUN';
+    this.stamina.appendChild(staminaLabel);
     this.threat = div('hud-threat');
     this.threat.textContent = 'SOMETHING IS CLOSE';
     this.dir = div('hud-dir');
@@ -108,6 +111,12 @@ export class Hud {
     }
   }
 
+  /**
+   * The bar is always on screen during play. It used to appear only once the
+   * player was already sprinting or drained, which meant a player who never
+   * guessed that sprinting existed was never told - the one piece of UI that
+   * advertises the mechanic was hidden behind using the mechanic.
+   */
   setStamina(v: number, visible: boolean): void {
     this.stamina.style.display = visible ? 'block' : 'none';
     this.staminaFill.style.width = `${Math.round(Math.max(0, Math.min(1, v)) * 100)}%`;

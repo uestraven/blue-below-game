@@ -6,7 +6,7 @@ driven in headless Chromium 159 (SwiftShader software GL).
 Reproduce everything here with:
 
 ```bash
-npm test                 # 14 routes, 292 checks
+npm test                 # 14 routes, 297 checks
 node test/vantages.mjs   # 24 in-world screenshots
 node test/ui-shots.mjs   # 24 interface screenshots
 ```
@@ -15,7 +15,7 @@ node test/ui-shots.mjs   # 24 interface screenshots
 
 ## 1. Result summary
 
-**292 / 292 checks passed across 14 routes. All three endings verified.**
+**297 / 297 checks passed across 14 routes. All three endings verified.**
 
 | Route | What it plays | Result |
 |---|---|---|
@@ -105,6 +105,23 @@ room is no longer the same as finding the weapon.
 To keep the good ending discoverable without the sign, the records memo now
 ends: *"containment left one on site. sealed store off the tunnels — you will
 not find the door, you have to feel the air move."*
+
+### "I didn't know there was a sprint" — a discoverability defect
+
+Reported after the balance change above, and the more important finding of the
+two. Sprint was listed on the controls screen and nowhere else, and the stamina
+bar — the only in-world advertisement for it — was configured to appear *only*
+while sprinting or recovering. A player who never guessed the mechanic existed
+was therefore never told, which is a UI hiding a mechanic behind itself.
+
+Fixed on four surfaces:
+
+- the stamina bar is now **always** visible during play, labelled `SHIFT RUN`
+- the briefing screen lists the four verbs before the player is ever in danger
+- the opening toast in the lobby says to hold Shift, and repeats on a timer
+  until the player actually sprints, then stops permanently
+- the demon reveal and its first sighting of the player both say
+  `HOLD SHIFT TO RUN` instead of their usual line, until sprint has been used
 
 ### "Add the ability to hide in objects" — added, see route 13
 
@@ -284,13 +301,25 @@ cannot be trusted).
 
 | Check | Result |
 |---|---|
-| Walking is faster than the demon chases | 4.3 vs 4.1 u/s |
-| …but only marginally | margin **0.20 u/s (4.9%)** |
-| Sprinting opens the gap decisively | margin 2.50 u/s |
-| Walking away from a live chase gains ground | 2.66 → **4.10** units over a 33-unit corridor |
-| Sprinting gains much more | walk +1.44, sprint **+11.92** over the same stretch |
-| Survived both | 0 deaths |
-| A player who does **not** react still gets caught | ✓ — stood still beside a chasing demon and died |
+| The demon outruns a walking player | 5.0 vs 4.3 u/s |
+| A sprinting player outruns the demon | 6.6 vs 5.0 u/s |
+| One stamina bar buys enough lead to round a corner | 4.4 s of sprint = **29 units travelled, 7.1 units gained** |
+| Stamina refills slower than it drains, so sprint is rationed | drain 0.225/s, regen 0.16/s |
+| Walking away **loses** ground | 2.50 → 2.03 units (−0.47) |
+| Sprinting away **gains** ground | 2.58 → 10.39 units (+7.81) |
+| Sprinting is strictly better than walking under chase | walk −0.47, sprint +7.81 |
+| Sprinting + breaking line of sight + getting out of earshot **loses it** | `chase` → `search`, survived |
+| A player who does **not** react gets caught | ✓ — stood still beside a chasing demon and died |
+
+Method note: the scripted walker moves at a commanded speed and does not model
+stamina drain, so the two speed legs measure the raw difference. The stamina
+cost is asserted numerically from the exported constants, and exercised for
+real through the keyboard in route 12.
+
+Two assertions in this route failed on first write because the *test* stood
+still next to a chasing demon — once to observe its state, once to wait out its
+memory. Both were correctly fatal. The route now models the real escape: sprint,
+turn corners, keep going until out of earshot, then hold still.
 
 ### Route 13 — Hiding
 
@@ -418,21 +447,22 @@ confirm they feel right.
   is not a safe camping spot, and a thing that knocks from inside the walls
   should not be stopped by a fake one. It still blocks line of sight both ways,
   so you cannot shoot through it either.
-- **Reacting is what saves you.** The demon chases at 4.1 u/s, walking is 4.3
-  and sprinting is 6.6. So a player who notices it and simply moves away gains
-  about 0.2 u/s - measured as 1.4 units over a 33-unit corridor, which is slow
-  enough that they have to keep going and fast enough that reacting is what
-  matters. Sprinting is decisive: 11.9 units over the same stretch. Standing
-  still still gets you killed, and route 14 asserts that too.
+- **Sprinting is the escape, and stamina is its price.** The demon chases at
+  5.0 u/s, walking is 4.3 and sprinting is 6.6. Walking away loses about
+  0.7 u/s, so noticing it is not enough on its own: you sprint, round a corner,
+  and let it lose you — which is what the 5 s memory and 13 s search are for.
+  One full stamina bar is 4.4 s of sprint, 29 units of travel, and 7.1 units
+  gained, which is enough to get round a corner and no more. Hiding places
+  remove you from its senses entirely.
 
-  This was changed after the first human playtest. The demon used to chase at
-  5.0 u/s, *faster* than walking, so the only escape was precise sprint-stamina
-  management and the chase punished players who did the right thing a beat too
-  slowly rather than players who did the wrong thing.
-
-  Breaking line of sight is still the better tool and still works the same way:
-  the demon holds a last known position for 5 s, searches for 13 s, then
-  returns to patrol. Hiding places remove you from its senses entirely.
+  This number went back and forth and the history is worth recording. After the
+  first playtest it was dropped to 4.1, *below* walking speed, so that simply
+  moving away was enough. That was the wrong fix for the right complaint: the
+  tester had not escaped because **they never knew sprinting existed**, and the
+  one piece of UI that advertises it — the stamina bar — only appeared once you
+  were already sprinting. Fixing the discoverability was the real fix; slowing
+  the demon below walking pace just made sprint and stamina pointless. Reverted
+  to 5.0 with discoverability fixed, on the tester's call.
 
 - **Readables are not a safe haven,** per the brief's "normal exploration
   rules". The world keeps running while a document is open; it auto-closes with

@@ -268,6 +268,9 @@ export function briefingScreen(onBegin: () => void): ScreenSpec {
       <p>You are already inside. The service entrance locked behind you.</p>
       <p class="hint">The front door has a powered release and a four letter lock.
       Have a look at it before you go anywhere.</p>
+      <p class="hint"><strong>W A S D</strong> to move, <strong>MOUSE</strong> to look,
+      <strong>SHIFT</strong> to run, <strong>E</strong> to use anything.
+      Full controls are on the pause screen.</p>
     `,
     choices: [{ label: 'GO IN', onPick: onBegin }],
   };
