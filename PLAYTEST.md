@@ -6,7 +6,7 @@ driven in headless Chromium 159 (SwiftShader software GL).
 Reproduce everything here with:
 
 ```bash
-npm test                 # 13 routes, 284 checks
+npm test                 # 14 routes, 292 checks
 node test/vantages.mjs   # 24 in-world screenshots
 node test/ui-shots.mjs   # 24 interface screenshots
 ```
@@ -15,7 +15,7 @@ node test/ui-shots.mjs   # 24 interface screenshots
 
 ## 1. Result summary
 
-**284 / 284 checks passed across 13 routes. All three endings verified.**
+**292 / 292 checks passed across 14 routes. All three endings verified.**
 
 | Route | What it plays | Result |
 |---|---|---|
@@ -32,6 +32,7 @@ node test/ui-shots.mjs   # 24 interface screenshots
 | 11 | Audio graph: every sound constructs and schedules in a live context | ✓ |
 | 12 | Real keyboard input: movement speeds, interaction, menus, a device panel | ✓ |
 | 13 | Hiding: invisible to the demon, and not a suspension | ✓ |
+| 14 | Chase balance: reacting and moving away is enough to escape | ✓ |
 
 How the harness plays: it picks real menu choices, presses real puzzle
 controls, walks with the real collision code and fires with the real hit check.
@@ -279,6 +280,18 @@ cannot be trusted).
 | **R** | Resets the counter |
 | **Esc** | Steps back out; control restored; no key left stuck |
 
+### Route 14 — Chase balance
+
+| Check | Result |
+|---|---|
+| Walking is faster than the demon chases | 4.3 vs 4.1 u/s |
+| …but only marginally | margin **0.20 u/s (4.9%)** |
+| Sprinting opens the gap decisively | margin 2.50 u/s |
+| Walking away from a live chase gains ground | 2.66 → **4.10** units over a 33-unit corridor |
+| Sprinting gains much more | walk +1.44, sprint **+11.92** over the same stretch |
+| Survived both | 0 deaths |
+| A player who does **not** react still gets caught | ✓ — stood still beside a chasing demon and died |
+
 ### Route 13 — Hiding
 
 Took the diamond, triggered the reveal for real, broke east to the maze sump
@@ -405,12 +418,22 @@ confirm they feel right.
   is not a safe camping spot, and a thing that knocks from inside the walls
   should not be stopped by a fake one. It still blocks line of sight both ways,
   so you cannot shoot through it either.
-- **Walking alone will not escape a chase.** The demon moves at 5.0 u/s;
-  walking is 4.3 and sprinting is 6.6 with roughly a 4.4 s sprint on a 10.7 s
-  stamina cycle, averaging about 5.25 u/s. The margin is deliberately thin, and
-  the real tool is breaking line of sight at corners — the demon holds a last
-  known position for 5 s, then searches for 13 s, then returns to patrol. The
-  pinned note in the secret store tells the player this.
+- **Reacting is what saves you.** The demon chases at 4.1 u/s, walking is 4.3
+  and sprinting is 6.6. So a player who notices it and simply moves away gains
+  about 0.2 u/s - measured as 1.4 units over a 33-unit corridor, which is slow
+  enough that they have to keep going and fast enough that reacting is what
+  matters. Sprinting is decisive: 11.9 units over the same stretch. Standing
+  still still gets you killed, and route 14 asserts that too.
+
+  This was changed after the first human playtest. The demon used to chase at
+  5.0 u/s, *faster* than walking, so the only escape was precise sprint-stamina
+  management and the chase punished players who did the right thing a beat too
+  slowly rather than players who did the wrong thing.
+
+  Breaking line of sight is still the better tool and still works the same way:
+  the demon holds a last known position for 5 s, searches for 13 s, then
+  returns to patrol. Hiding places remove you from its senses entirely.
+
 - **Readables are not a safe haven,** per the brief's "normal exploration
   rules". The world keeps running while a document is open; it auto-closes with
   a warning if the demon gets within 13 units.

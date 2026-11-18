@@ -24,7 +24,22 @@ export type DemonState = 'dormant' | 'reveal' | 'patrol' | 'investigate' | 'chas
 export const DEMON_RADIUS = 0.5;
 const SPEED_PATROL = 2.35;
 const SPEED_INVESTIGATE = 3.2;
-const SPEED_CHASE = 5.0;
+/**
+ * Chase speed, and the most important number in the game.
+ *
+ * It sits marginally *below* the player's walk (4.3), so a player who reacts
+ * and simply moves away gains about 0.2 u/s - slow enough that they have to
+ * keep going, fast enough that reacting is what saves them. Sprinting opens
+ * the gap decisively at +2.5 u/s.
+ *
+ * It was 5.0, above the walk, which meant walking away lost ground and the
+ * only escape was precise sprint-stamina management. That made the chase
+ * punish players who did the right thing a beat too slowly rather than players
+ * who did the wrong thing, and it is why it is now a shade slower than you are.
+ *
+ * Keep this below `WALK_SPEED` in player.ts. Route 14 asserts the relationship.
+ */
+export const SPEED_CHASE = 4.1;
 const SIGHT_RANGE = 34;
 const SIGHT_HALF_ANGLE = Math.cos(THREE.MathUtils.degToRad(55));
 const CATCH_DISTANCE = 1.55;
@@ -476,6 +491,15 @@ export class Demon {
     this.animatePose(speed, dt);
     this.applyTransform();
     this.applyLighting();
+  }
+
+  /** Drop straight into a chase on a known point. Used by balance tests. */
+  forceChase(px: number, pz: number): void {
+    this.alive = true;
+    this.group.visible = true;
+    this.revealTimer = 0;
+    this.grace = 0;
+    this.enterChase(px, pz);
   }
 
   private enterChase(px: number, pz: number): void {

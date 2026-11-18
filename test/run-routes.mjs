@@ -110,6 +110,7 @@ async function main() {
     ['11', 'Audio graph: every sound constructs and schedules', route11],
     ['12', 'Real keyboard input drives the game, not just the debug table', route12],
     ['13', 'Hiding: invisible to the demon, and not a suspension', route13],
+    ['14', 'Chase balance: reacting and moving away is enough to escape', route14],
   ];
 
   for (const [num, title, fn] of routes) {
@@ -1251,6 +1252,74 @@ async function route13(api, page) {
   await api.step(1 / 60, 120);
   s = await api.snap();
   check('the demon can detect the player again once out of cover', s.demon.state !== 'patrol', s.demon.state);
+}
+
+// =====================================================================
+// ROUTE 14 - chase balance
+// =====================================================================
+async function route14(api) {
+  await startRun(api, 14014);
+
+  // --- the numbers -----------------------------------------------------
+  const t = await api.call('tuning');
+  out(`    note  walk ${t.walk} u/s, sprint ${t.sprint} u/s, demon chase ${t.chase} u/s`);
+  check('walking is faster than the demon chases', t.walk > t.chase, `${t.walk} vs ${t.chase}`);
+  check(
+    'but only marginally, so moving away is not an instant getaway',
+    t.walk - t.chase > 0.05 && t.walk - t.chase < 0.7,
+    `margin ${(t.walk - t.chase).toFixed(2)} u/s (${(((t.walk - t.chase) / t.chase) * 100).toFixed(1)}%)`,
+  );
+  check('sprinting opens the gap decisively', t.sprint - t.chase > 1.5, `margin ${(t.sprint - t.chase).toFixed(2)} u/s`);
+
+  /** Put the player mid-corridor with the demon right behind, chasing. */
+  const stage = async (playerCell, demonCell) => {
+    await api.call('teleportCell', playerCell[0], playerCell[1]);
+    await api.step(1 / 60, 4);
+    await api.call('forceChase');
+    await api.call('forceDemonTo', demonCell[0], demonCell[1]);
+    await api.step(1 / 60, 6);
+    return (await api.snap()).demon.distance;
+  };
+
+  const eastEnd = [(16.5 - 32) * 3, (3.5 - 26) * 3]; // far end of the long tunnel
+
+  // --- walking away ----------------------------------------------------
+  let d0 = await stage([5, 4], [4, 4]);
+  await api.call('walkTo', eastEnd[0], eastEnd[1], 12000, 4.3);
+  let s = await api.snap();
+  check('survived walking away from a live chase', s.phase === 'play' && s.deaths === 0, `phase=${s.phase}`);
+  check(
+    'walking away GAINS ground on the demon',
+    s.demon.distance > d0 + 0.5,
+    `${d0.toFixed(2)} -> ${s.demon.distance.toFixed(2)} units`,
+  );
+  const walkGain = s.demon.distance - d0;
+
+  // --- sprinting away --------------------------------------------------
+  d0 = await stage([5, 4], [4, 4]);
+  await api.call('walkTo', eastEnd[0], eastEnd[1], 12000, 6.6);
+  s = await api.snap();
+  check('survived sprinting away', s.phase === 'play' && s.deaths === 0, `phase=${s.phase}`);
+  const sprintGain = s.demon.distance - d0;
+  check(
+    'sprinting gains much more ground than walking',
+    sprintGain > walkGain * 2,
+    `walk +${walkGain.toFixed(2)}, sprint +${sprintGain.toFixed(2)} over the same corridor`,
+  );
+
+  // --- it still has teeth ----------------------------------------------
+  // The point is that reacting saves you, not that nothing can hurt you.
+  await stage([9, 4], [8, 4]);
+  let caught = false;
+  for (let i = 0; i < 80; i++) {
+    await api.step(1 / 60, 15);
+    if ((await api.snap()).phase === 'death') {
+      caught = true;
+      break;
+    }
+  }
+  check('a player who does NOT react still gets caught', caught, 'stood still next to a chasing demon');
+  if (caught) await api.call('pick', 'RETRY FROM THE VAULT');
 }
 
 main().catch((e) => {

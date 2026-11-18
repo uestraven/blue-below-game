@@ -29,8 +29,8 @@ import {
 } from '../world/layout';
 import { SURFACE, flatTexture } from '../world/textures';
 import { PAL } from '../world/palette';
-import { Player, EYE_HEIGHT, PLAYER_RADIUS } from './player';
-import { Demon, DEMON_RADIUS } from './demon';
+import { Player, EYE_HEIGHT, PLAYER_RADIUS, WALK_SPEED, SPRINT_SPEED } from './player';
+import { Demon, DEMON_RADIUS, SPEED_CHASE } from './demon';
 import { RunState } from './state';
 import { Hud } from '../ui/hud';
 import { PuzzleHost, type PuzzleKind } from '../ui/puzzles';
@@ -1514,6 +1514,14 @@ export class Game {
       regionAt: (x: number, z: number) => this.grid.regionIdAt(x, z),
       thresholdZ: () => FRONT_DOOR.thresholdZ,
       playerEyeY: () => this.player.camera.position.y,
+      /** The chase-balance numbers, so a test can assert the relationship. */
+      tuning: () => ({ walk: WALK_SPEED, sprint: SPRINT_SPEED, chase: SPEED_CHASE }),
+      /** Put the demon in a chase on the player, for balance tests. */
+      forceChase: () => {
+        this.run.progress.diamondTaken = true;
+        this.playReveal();
+        this.demon.forceChase(this.player.x, this.player.z);
+      },
       playerSpeed: () => this.player.speed,
       playerStamina: () => this.player.stamina,
       heldActions: () => [...this.input.held],

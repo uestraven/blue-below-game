@@ -15,8 +15,8 @@ import type { AudioEngine } from '../core/audio';
 
 export const PLAYER_RADIUS = 0.42;
 export const EYE_HEIGHT = 1.62;
-const WALK_SPEED = 4.3;
-const SPRINT_SPEED = 6.6;
+export const WALK_SPEED = 4.3;
+export const SPRINT_SPEED = 6.6;
 /**
  * Velocity approaches its target exponentially, with these time constants in
  * seconds. This is deliberately not an impulse-and-friction model: that form
