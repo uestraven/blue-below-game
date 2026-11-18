@@ -110,6 +110,7 @@ Both are reproducible: every procedural asset is seeded from its own name.
 | **Left click** | Fire a flare, once you have the signal pistol |
 | **Esc** | Close an interaction, or pause while exploring |
 | **Tab** | Clue journal (also reachable from the pause screen) |
+| **F3** | AI debug overlay — development builds only |
 
 Pressing **E** at a locker, a crate, or the gap under a desk or counter climbs
 inside it. While you are in there the demon cannot see or hear you at all, and
@@ -196,6 +197,25 @@ entirely. Hiding does not: the world keeps running and it keeps hunting, so it
 comes to where it last saw you, searches, and eventually wanders off. You just
 stop being something it can find.
 
+**How it hunts.** It has exactly one sense: sight. A configurable cone (110°),
+a maximum range (34 units), and a true three-dimensional line of sight that
+walls, furniture and the closed front door all stop. It checks three heights up
+your body, so peeking round a corner is a real thing rather than a coin toss.
+**Nothing else ever tells it where you are** — there is no hearing model, and
+leaving a hiding place does not give you away.
+
+Unseen, it patrols a graph of connected nodes through the halls, intersections
+and rooms, weighted toward places it has not been recently, pausing and turning
+at junctions. It is looking the whole time it does this, so standing in its
+view while it dwells at a corner is fatal.
+
+Once it sees you it chases, updating where it last saw you for as long as it
+keeps you in sight. Break line of sight and it goes to **the last place it
+actually saw you** — not where you are — while a five-second clock runs. Show
+yourself inside those five seconds and the clock resets. Stay unseen for five
+unbroken seconds and it gives up, starting its next patrol near that last
+sighting and widening out from there. A device panel freezes that clock dead.
+
 **On outrunning it.** It chases at 5.0 units/second, you walk at 4.3 and sprint
 at 6.6. Walking away loses ground, so noticing it is not enough on its own: you
 sprint, round a corner, and let it lose you. One full stamina bar is about 4.4
@@ -252,7 +272,8 @@ src/
     game.ts               phase machine, interaction, reveal, ritual, endings
     flares.ts             flare projectiles, burning, and dynamic flare light
     player.ts             movement, collision, footsteps, view locking
-    demon.ts              patrol / investigate / chase / search, suspension
+    demon.ts              sight-only detection, patrol graph, chase, lost sight
+    aidebug.ts            development-only AI visualisation (F3)
     state.ts              run state, generated secrets, the checkpoint
   ui/
     screens.ts            title, briefing, note, decision, pause, endings

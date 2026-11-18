@@ -356,28 +356,87 @@ export const PLAYER_START = { gx: 38.5, gz: 41.0, yaw: 0 } as const;
 /** Diamond pedestal, on the vault dais. */
 export const PEDESTAL = { gx: 47.0, gz: 7.5 } as const;
 
-/** Demon patrol ring, in grid coords. Walked in order while unaware. */
-export const PATROL: ReadonlyArray<readonly [number, number]> = [
-  [13, 11],
-  [4, 10],
-  [4, 4],
-  [13, 4],
-  [16, 8],
-  [24, 8],
-  [25, 4],
-  [13, 14],
-  [14, 18],
-  [10, 27],
-  [24, 22],
-  [31, 22],
-  [33, 28],
-  [38, 32],
-  [38, 41],
-  [45, 42],
-  [46, 33],
-  [46, 18],
-  [33, 18],
+/**
+ * The demon's patrol graph.
+ *
+ * Nodes sit in hallways, at intersections and in rooms; edges join nodes that
+ * are actually walkable from one another. The demon picks destinations from
+ * this graph by weighted preference for places it has not been recently, which
+ * is what makes it appear to be searching the building rather than running a
+ * fixed loop.
+ *
+ * `kind` only affects flavour: it pauses and looks around for longer at an
+ * intersection than in the middle of a corridor.
+ */
+export interface PatrolNode {
+  id: number;
+  name: string;
+  gx: number;
+  gz: number;
+  kind: 'hall' | 'intersection' | 'room';
+  /** Ids of nodes reachable from here without passing another node. */
+  links: number[];
+}
+
+export const PATROL_NODES: PatrolNode[] = [
+  { id: 0, name: 'reception centre', gx: 38, gz: 41, kind: 'room', links: [1, 2, 3, 4] },
+  { id: 1, name: 'reception west', gx: 32, gz: 43, kind: 'room', links: [0, 2] },
+  { id: 2, name: 'records', gx: 23, gz: 42, kind: 'room', links: [0, 1] },
+  { id: 3, name: 'corridor A south', gx: 38, gz: 35, kind: 'hall', links: [0, 5] },
+  { id: 4, name: 'corridor A2 south', gx: 45, gz: 35, kind: 'hall', links: [0, 6] },
+  { id: 5, name: 'corridor A north', gx: 38, gz: 31, kind: 'hall', links: [3, 7] },
+  { id: 6, name: 'corridor A2 north', gx: 45, gz: 31, kind: 'hall', links: [4, 8] },
+  { id: 7, name: 'generator south-west', gx: 33, gz: 28, kind: 'intersection', links: [5, 8, 9] },
+  { id: 8, name: 'generator south-east', gx: 46, gz: 28, kind: 'intersection', links: [6, 7, 10] },
+  { id: 9, name: 'generator west', gx: 30, gz: 22, kind: 'intersection', links: [7, 11, 12] },
+  { id: 10, name: 'generator east', gx: 48, gz: 22, kind: 'hall', links: [8, 12] },
+  { id: 11, name: 'corridor B', gx: 24, gz: 22, kind: 'hall', links: [9, 13] },
+  { id: 12, name: 'generator north', gx: 39, gz: 17, kind: 'hall', links: [9, 10] },
+  { id: 13, name: 'workshop east', gx: 18, gz: 22, kind: 'room', links: [11, 14, 15] },
+  { id: 14, name: 'workshop south', gx: 11, gz: 27, kind: 'room', links: [13, 15] },
+  { id: 15, name: 'workshop north', gx: 13, gz: 18, kind: 'room', links: [13, 14, 16] },
+  { id: 16, name: 'stair head', gx: 13, gz: 14, kind: 'hall', links: [15, 17] },
+  { id: 17, name: 'tunnel mouth', gx: 13, gz: 11, kind: 'intersection', links: [16, 18, 19] },
+  { id: 18, name: 'west tunnel', gx: 6, gz: 10, kind: 'hall', links: [17, 20] },
+  { id: 19, name: 'mid branch', gx: 10, gz: 8, kind: 'hall', links: [17, 21] },
+  { id: 20, name: 'pump chamber', gx: 4, gz: 8, kind: 'room', links: [18, 22] },
+  { id: 21, name: 'north tunnel', gx: 13, gz: 4, kind: 'intersection', links: [19, 22, 23] },
+  { id: 22, name: 'north-west tunnel', gx: 4, gz: 4, kind: 'hall', links: [20, 21] },
+  { id: 23, name: 'east tunnel', gx: 16, gz: 6, kind: 'intersection', links: [21, 24, 27] },
+  { id: 24, name: 'collapsed shelving', gx: 21, gz: 9, kind: 'hall', links: [23, 25, 26] },
+  { id: 25, name: 'sump', gx: 25, gz: 11, kind: 'room', links: [24] },
+  { id: 26, name: 'north link', gx: 25, gz: 6, kind: 'hall', links: [24, 28] },
+  // Behind the false wall. The demon goes through it, so the sealed store is
+  // not a hiding place by default.
+  { id: 27, name: 'sealed store', gx: 21, gz: 6, kind: 'room', links: [23] },
+  { id: 28, name: 'north-east tunnel', gx: 27, gz: 4, kind: 'hall', links: [26, 29] },
+  { id: 29, name: 'vault approach', gx: 33, gz: 4, kind: 'hall', links: [28, 30] },
+  { id: 30, name: 'vault west', gx: 40, gz: 7, kind: 'room', links: [29, 31] },
+  { id: 31, name: 'vault east', gx: 53, gz: 7, kind: 'room', links: [30] },
 ];
+
+/** Flat list of patrol cells, kept for the flare-return placement search. */
+export const PATROL: ReadonlyArray<readonly [number, number]> = PATROL_NODES.map(
+  (n) => [n.gx, n.gz] as const,
+);
+
+/**
+ * Demon sight. All three are tuning knobs rather than constants of nature.
+ *
+ * `fovDegrees` is the full cone, `range` the furthest it can make out a person
+ * at all, and `peripheralRadius` the distance within which the cone stops
+ * mattering - you are standing next to it.
+ */
+export const DEMON_SIGHT = {
+  fovDegrees: 110,
+  range: 34,
+  peripheralRadius: 3.2,
+  /** Heights above the floor it checks for, in order of how telling they are. */
+  bodyPoints: [1.55, 1.0, 0.35],
+};
+
+/** Seconds of unbroken no-sight that ends a chase. */
+export const LOST_SIGHT_SECONDS = 5;
 
 /**
  * First-reveal staging. When the player, carrying the diamond, reaches the east

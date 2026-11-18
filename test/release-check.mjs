@@ -66,6 +66,16 @@ async function main() {
 
   // Parse _headers the way Cloudflare does, so a malformed edit is caught here
   // rather than by silently dropping a rule in production.
+  // The AI visualisation is development-only and must not reach the release.
+  // Strings that exist only inside src/game/aidebug.ts. Deliberately not the
+  // group name 'ai-debug', which the release-side asset audit legitimately
+  // references in order to skip the overlay.
+  const aiDebugStrings = ['AI DEBUG', 'lost timer', 'patrol dest', 'sees player'];
+  const leaked = aiDebugStrings.filter((t) => bundle.includes(t));
+  check('the development AI visualisation is absent from the release bundle', leaked.length === 0, leaked.join(', '));
+  const chunks = files.filter((f) => f.endsWith('.js'));
+  check('no extra chunk shipped for it either', chunks.length === 1, chunks.join(' '));
+
   const headers = await readFile(path.join(DIST, '_headers'), 'utf8');
   const rules = [];
   let current = null;

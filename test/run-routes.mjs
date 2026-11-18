@@ -115,6 +115,7 @@ async function main() {
     ['16', 'Flare hit: 60 active seconds, paused by panels, Bad Ending while absent', route16],
     ['17', 'Two keys, two locks, and the cross collected exactly once', route17],
     ['18', 'The ritual kills permanently from every demon state', route18],
+    ['19', 'Hunting: sight-only detection, patrol, pursuit, lost sight', route19],
   ];
 
   for (const [num, title, fn] of routes) {
@@ -226,17 +227,21 @@ async function startRun(api, seed) {
 }
 
 /** Collect the brass key, open the personal box and take the cross. */
-async function collectCross(api, speed = 4.3) {
+async function collectCross(api, speed = 4.3, park = null) {
+  if (park) await api.call('forceDemonTo', park[0], park[1]);
   await walkToAndUse(api, 'box-key', { speed });
   check('brass key collected', (await api.call('ritualState')).hasBoxKey);
+  if (park) await api.call('forceDemonTo', park[0], park[1]);
   await walkToAndUse(api, 'personal-box', { speed });
   check('personal box unlocked with the brass key', (await api.call('ritualState')).boxOpen);
+  if (park) await api.call('forceDemonTo', park[0], park[1]);
   await walkToAndUse(api, 'cross', { speed });
   check('crucifix collected', (await api.call('ritualState')).hasCross);
 }
 
 /** Walk through the false wall and place the cross in the seal. */
-async function performRitual(api, speed = 4.3) {
+async function performRitual(api, speed = 4.3, park = null) {
+  if (park) await api.call('forceDemonTo', park[0], park[1]);
   await walkToAndUse(api, 'pentagram', { speed, use: false });
   await api.call('use', 'pentagram');
   eq('the seal offers the ritual', await api.call('screenId'), 'ritual-decision');
@@ -248,12 +253,19 @@ async function performRitual(api, speed = 4.3) {
   await api.step(1 / 60, 300);
 }
 
-/** Collect the signal pistol and all three loose flares. */
-async function collectAllFlares(api, speed = 4.3) {
+/**
+ * Collect the signal pistol and all three loose flares. `park` re-parks the
+ * demon before each leg: these are long walks across the whole facility and a
+ * live patrol will otherwise intercept the scripted walker somewhere in the
+ * middle of them.
+ */
+async function collectAllFlares(api, speed = 4.3, park = null) {
+  if (park) await api.call('forceDemonTo', park[0], park[1]);
   await walkToAndUse(api, 'flare-gun', { speed });
   let f = await api.call('flareState');
   check('signal pistol found loaded with one flare', f.hasGun && f.flares === 1, JSON.stringify(f));
   for (const id of ['flare-corrA2', 'flare-generator', 'flare-sump']) {
+    if (park) await api.call('forceDemonTo', park[0], park[1]);
     await walkToAndUse(api, id, { speed });
   }
   f = await api.call('flareState');
@@ -1547,10 +1559,11 @@ async function route16(api, page) {
   await api.call('closePuzzle');
 
   // And the pause screen stops it too.
-  const beforePause = (await api.call('ritualState')).absence;
   await api.call('blurWindow');
   await api.step(1 / 60, 2);
   eq('paused', (await api.snap()).phase, 'menu');
+  // Measured strictly from inside the pause, for the same reason as above.
+  const beforePause = (await api.call('ritualState')).absence;
   await api.step(1 / 60, 600);
   const afterPause = (await api.call('ritualState')).absence;
   check(
@@ -1769,6 +1782,264 @@ async function route18(api, page) {
   s = await api.snap();
   eq('cross-before-diamond still reaches the Good Ending', s.ending, 'good');
   await api.shot(page, 'route18-good-from-armed-seal');
+}
+
+// =====================================================================
+// ROUTE 19 - the hunting system
+// =====================================================================
+
+/** Put the demon on the board, on patrol, with no knowledge of the player. */
+async function stageHunt(api, seed) {
+  await startRun(api, seed);
+  const d = await findInteractable(api, 'diamond');
+  const stand = await api.call('approachPoint', d.x, d.z);
+  await api.call('walkTo', stand.x, stand.z, 18000, 4.3);
+  await api.call('use', 'diamond');
+  await api.call('pick', 'LOOK AT THE STONE');
+  await api.call('pick', 'TAKE THE DIAMOND');
+  await walkUntilReveal(api);
+  await api.step(1 / 60, 260); // let the reveal hold expire
+  // Drop it back to patrol with a clean slate.
+  await api.call('forceDemonTo', 30, 22);
+  await api.call('beginPatrol');
+  await api.step(1 / 60, 10);
+  return api.call('aiState');
+}
+
+/** Stand the player at `pcell` and the demon at `dcell`, demon facing `look`. */
+async function place(api, pcell, dcell, lookAtPlayer = true) {
+  await api.call('teleportCell', pcell[0], pcell[1]);
+  await api.call('forceDemonTo', dcell[0], dcell[1]);
+  const px = (pcell[0] + 0.5 - 32) * 3;
+  const pz = (pcell[1] + 0.5 - 26) * 3;
+  if (lookAtPlayer) await api.call('faceDemonAt', px, pz);
+  else await api.call('faceDemonAt', px, pz + 60);
+  await api.step(1 / 60, 4);
+}
+
+async function route19(api, page) {
+  const cell = (gx, gz) => [(gx + 0.5 - 32) * 3, (gz + 0.5 - 26) * 3];
+
+  // --- the configuration is real and exposed ---------------------------
+  const sight = await api.call('demonSight');
+  out(`    note  FOV ${sight.fovDegrees} deg, range ${sight.range}, body points ${sight.bodyPoints.join('/')}`);
+  check('field of view, range and body points are configurable', sight.fovDegrees > 0 && sight.range > 0 && sight.bodyPoints.length >= 2);
+
+  let ai = await stageHunt(api, 19019);
+  // Put the player behind the shut front door: the demon cannot path there and
+  // cannot see through it, so the patrol runs undisturbed.
+  await api.call('teleportCell', 38, 49);
+  await api.step(1 / 60, 4);
+  eq('starts on patrol', ai.state, 'patrol');
+  check('and knows nothing about the player', !ai.hasLastSeen);
+  await api.shot(page, 'route19-patrol');
+
+  // --- it explores: patrol destinations change over time ---------------
+  const visited = new Set();
+  for (let i = 0; i < 160; i++) {
+    await api.step(1 / 60, 30);
+    const cur = await api.call('aiState');
+    if (cur.patrolTarget >= 0) visited.add(cur.patrolTarget);
+    if (cur.state !== 'patrol') break;
+  }
+  ai = await api.call('aiState');
+  check('it patrols to a series of different places', visited.size >= 3, `${visited.size} destinations: ${[...visited].join(',')}`);
+  eq('still on patrol, never having seen the player', ai.state, 'patrol');
+
+  // --- 1. leaving a hiding place does NOT reveal the player -------------
+  ai = await stageHunt(api, 19119);
+  await api.call('forceDemonTo', 53, 10); // out of the way while we walk there
+  await walkToAndUse(api, 'hide-tunnel-locker', { speed: 6.6, use: false });
+  await api.call('use', 'hide-tunnel-locker');
+  check('player hidden', (await api.snap()).player.hidden);
+
+  // Behind a wall, two rooms away, on patrol.
+  await api.call('forceDemonTo', 11, 27);
+  await api.call('beginPatrol');
+  await api.step(1 / 60, 4);
+  await api.call('exitHide');
+  await api.step(1 / 60, 4);
+  ai = await api.call('aiState');
+  check('exiting hiding does not hand it the player position', ai.state !== 'chase', ai.state);
+  check('and it still knows nothing', !ai.hasLastSeen);
+
+  let chased = false;
+  for (let i = 0; i < 100; i++) {
+    await api.step(1 / 60, 3);
+    const cur = await api.call('aiState');
+    if (cur.state === 'chase') {
+      chased = true;
+      break;
+    }
+    // Keep it in the workshop so this stays a no-line-of-sight test rather
+    // than a race against where its patrol happens to wander.
+    if (cur.patrolTarget >= 0 && i % 10 === 0) await api.call('forceDemonTo', 11, 27);
+  }
+  check('with no line of sight it keeps patrolling and never chases', !chased);
+
+  // And directly behind its back, outside the "right next to it" radius.
+  await api.call('teleportCell', 13, 4);
+  await api.call('forceDemonTo', 8, 4);
+  await api.call('faceDemonAt', cell(2, 4)[0], cell(2, 4)[1]); // looking away, west
+  await api.step(1 / 60, 1);
+  let seenFromBehind = false;
+  for (let i = 0; i < 90; i++) {
+    await api.call('faceDemonAt', cell(2, 4)[0], cell(2, 4)[1]);
+    await api.step(1 / 60, 1);
+    if ((await api.call('aiState')).sees) seenFromBehind = true;
+  }
+  check('standing behind it, outside its cone, is not detected', !seenFromBehind);
+
+  // --- 2. walking into its cone is detected ----------------------------
+  ai = await stageHunt(api, 19219);
+  await place(api, [13, 4], [6, 4]); // straight tunnel, demon looking east
+  await api.step(1 / 60, 10);
+  ai = await api.call('aiState');
+  check('in the unobstructed cone, it sees the player', ai.sees, `rays ${JSON.stringify(ai.rays)}`);
+  await api.step(1 / 60, 10);
+  ai = await api.call('aiState');
+  eq('and starts chasing', ai.state, 'chase');
+  check('last seen is the player position', ai.hasLastSeen);
+  await api.shot(page, 'route19-chase');
+
+  // --- 3. a wall blocks detection --------------------------------------
+  await place(api, [13, 11], [13, 4]); // demon in the tunnel, player below a wall
+  await api.step(1 / 60, 6);
+  ai = await api.call('aiState');
+  check('solid geometry between them blocks detection', !ai.sees, `rays ${JSON.stringify(ai.rays)}`);
+
+  // --- 4. break sight round a corner -> pursues the LAST SEEN point ----
+  ai = await stageHunt(api, 19319);
+  await place(api, [13, 4], [6, 4]);
+  await api.step(1 / 60, 20);
+  eq('chasing', (await api.call('aiState')).state, 'chase');
+  const seenAt = (await api.call('aiState')).lastSeen;
+  // Duck round the corner into the G tunnel, out of the cone and behind a wall.
+  await api.call('teleportCell', 17, 8);
+  await api.step(1 / 60, 10);
+  ai = await api.call('aiState');
+  check('sight is broken', !ai.sees);
+  eq('it switches to pursuing the last seen position', ai.state, 'lostSight');
+  check(
+    'the destination is where it last SAW the player, not where they are',
+    Math.hypot(ai.lastSeen.x - seenAt.x, ai.lastSeen.z - seenAt.z) < 0.6,
+    `last seen ${ai.lastSeen.x.toFixed(1)},${ai.lastSeen.z.toFixed(1)} vs seen-at ${seenAt.x.toFixed(1)},${seenAt.z.toFixed(1)}`,
+  );
+  await api.shot(page, 'route19-lostsight');
+
+  // --- 5. moving while concealed does not move its destination ---------
+  await api.call('teleportCell', 24, 9);
+  await api.step(1 / 60, 30);
+  ai = await api.call('aiState');
+  check(
+    'moving elsewhere unseen leaves its destination at the last observation',
+    Math.hypot(ai.lastSeen.x - seenAt.x, ai.lastSeen.z - seenAt.z) < 0.6,
+    `${ai.lastSeen.x.toFixed(1)},${ai.lastSeen.z.toFixed(1)}`,
+  );
+  check('still hunting the stale position', ai.state === 'lostSight' || ai.state === 'patrol', ai.state);
+
+  // --- 6. unseen for more than five seconds -> patrol -------------------
+  ai = await stageHunt(api, 19419);
+  await place(api, [13, 4], [6, 4]);
+  await api.step(1 / 60, 20);
+  eq('chasing', (await api.call('aiState')).state, 'chase');
+  await api.call('teleportCell', 25, 11); // the sump, far and out of sight
+  let timeline = [];
+  for (let i = 0; i < 80; i++) {
+    await api.step(1 / 60, 15);
+    const cur = await api.call('aiState');
+    timeline.push(cur.lostTimer);
+    if (cur.state === 'patrol') break;
+  }
+  ai = await api.call('aiState');
+  eq('after five unbroken seconds it gives up and patrols', ai.state, 'patrol');
+  // Sampled every 0.25 s, so the observed peak sits just under the threshold
+  // it crossed; what matters is that it crossed it and then gave up.
+  check(
+    'the lost-sight timer ran to the five second threshold',
+    Math.max(...timeline) >= 4.6,
+    `peak observed ${Math.max(...timeline).toFixed(2)}s of a 5s threshold`,
+  );
+  check('and it starts its new route near the last sighting', ai.patrolTarget >= 0, `node ${ai.patrolTarget}`);
+
+  // --- 7. regaining sight inside five seconds resets the timer ----------
+  ai = await stageHunt(api, 19519);
+  await place(api, [13, 4], [6, 4]);
+  await api.step(1 / 60, 20);
+  eq('chasing', (await api.call('aiState')).state, 'chase');
+  await api.call('teleportCell', 17, 8); // break sight
+  await api.step(1 / 60, 120); // ~2 seconds
+  ai = await api.call('aiState');
+  check('timer is running but under five seconds', ai.lostTimer > 0.5 && ai.lostTimer < 5, `${ai.lostTimer.toFixed(2)}s`);
+  // Step back into view.
+  await place(api, [13, 4], [6, 4]);
+  await api.step(1 / 60, 12);
+  ai = await api.call('aiState');
+  check('seeing the player again resumes the chase', ai.state === 'chase' && ai.sees, ai.state);
+  eq('and the lost-sight timer is reset', Math.round(ai.lostTimer * 100) / 100, 0);
+
+  // --- 8. a puzzle contributes ZERO seconds to the timer ----------------
+  ai = await stageHunt(api, 19619);
+  await place(api, [13, 4], [6, 4]);
+  await api.step(1 / 60, 20);
+  await api.call('teleportCell', 17, 8);
+  await api.step(1 / 60, 60);
+  const beforePuzzleTimer = (await api.call('aiState')).lostTimer;
+  check('timer running before the panel opens', beforePuzzleTimer > 0.3, `${beforePuzzleTimer.toFixed(2)}s`);
+  await api.call('forceDemonTo', 53, 10);
+  await walkToAndUse(api, 'safe', { speed: 6.6, use: false });
+  await api.call('use', 'safe');
+  eq('panel open', await api.call('puzzleOpen'), 'safe');
+  const atOpen = (await api.call('aiState')).lostTimer;
+  await api.step(1 / 60, 600); // ten simulated seconds
+  const atClose = (await api.call('aiState')).lostTimer;
+  check(
+    'the suspended time contributes zero seconds to the lost-sight timer',
+    Math.abs(atClose - atOpen) < 0.001,
+    `${atOpen.toFixed(3)} -> ${atClose.toFixed(3)} over 10 simulated seconds`,
+  );
+  check('and the demon did not move while suspended', (await api.call('aiState')).suspended);
+  await api.call('closePuzzle');
+  await api.step(1 / 60, 4);
+  check('timer resumes after stepping back', (await api.call('aiState')).lostTimer >= atClose);
+
+  // --- 9. flare banish -> returns on patrol, must see to chase ----------
+  ai = await stageHunt(api, 19719);
+  // Park it between legs: these are long walks and a live patrol intercepts
+  // the scripted walker otherwise.
+  await collectAllFlares(api, 6.6, [53, 10]);
+  check('survived collecting the flares', (await api.snap()).phase === 'play', (await api.snap()).phase);
+  await place(api, [14, 4], [6, 4]);
+  await api.step(1 / 60, 8);
+  eq('chasing before the flare', (await api.call('aiState')).state, 'chase');
+  const preFire = await api.call('aiState');
+  await api.call('fireAtDemon');
+  const fs = await api.call('flareState');
+  const rs = await api.call('ritualState');
+  check('the flare was fired', fs.fired >= 1, JSON.stringify(fs));
+  check('and it hit, suppressing the demon', rs.suppressed, `distance at fire ${preFire.distance.toFixed(1)}, ${JSON.stringify(rs)}`);
+  await api.step(1 / 60, 240);
+  eq('absent after the hit', (await api.call('aiState')).state, 'absent');
+  // Burn the clock down with the player standing somewhere it cannot see.
+  await api.call('teleportCell', 25, 11);
+  for (let i = 0; i < 400; i++) {
+    await api.step(1 / 60, 30);
+    if ((await api.call('aiState')).state !== 'absent') break;
+  }
+  ai = await api.call('aiState');
+  eq('it returns on PATROL, not straight into a chase', ai.state, 'patrol');
+  check('and with no knowledge of where the player is', !ai.hasLastSeen);
+
+  // --- 10. the ritual ends hunting permanently --------------------------
+  ai = await stageHunt(api, 19819);
+  await collectCross(api, 6.6, [53, 10]);
+  await performRitual(api, 6.6, [53, 10]);
+  check('ritual done', (await api.call('ritualState')).ritualDone);
+  await place(api, [13, 4], [6, 4]);
+  await api.step(1 / 60, 300);
+  ai = await api.call('aiState');
+  check('standing in full view of a dead demon does nothing', ai.state === 'dead' && !ai.alive, ai.state);
+  check('no pending return event', (await api.call('ritualState')).absence === 0);
 }
 
 main().catch((e) => {

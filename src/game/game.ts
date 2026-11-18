@@ -41,6 +41,7 @@ import {
 } from './player';
 import { Demon, DEMON_RADIUS, SPEED_CHASE } from './demon';
 import { Flares } from './flares';
+import { DEMON_SIGHT } from '../world/layout';
 import { RunState, FLARE_GUN_LOADED, FLARE_SUPPRESSION_SECONDS } from './state';
 import { Hud } from '../ui/hud';
 import { PuzzleHost, type PuzzleKind } from '../ui/puzzles';
@@ -104,6 +105,11 @@ export class Game {
   run: RunState;
   puzzles!: PuzzleHost;
   flares!: Flares;
+  /**
+   * Development-only AI visualisation. Constructed only when the debug build
+   * flag is set, so the release bundle neither contains it nor can show it.
+   */
+  aiDebug: import('./aidebug').AiDebug | null = null;
 
   phase: Phase = 'title';
   private interactables: Interactable[] = [];
@@ -126,7 +132,6 @@ export class Game {
   private endingFade = 0;
   private deathFade = 0;
   private fadeIn = 1;
-  private loudThisTick = false;
   private time = 0;
   /** True when the run is live but the browser has not given us the mouse. */
   private pendingResumeCapture = false;
@@ -191,6 +196,7 @@ export class Game {
     this.scene.add(this.demon.group);
     this.demon.onCatch = () => this.onCaught();
     this.demon.extraLight = (x, y, z, out) => this.flares.sample(x, y, z, out);
+    this.demon.seed(this.run.seed);
     this.demon.onSpot = () => {
       this.audio.play('roar', this.demon.centre, 0.9);
       this.hud.toast(this.sprintTaught ? 'It has seen you.' : 'It has seen you. HOLD SHIFT TO RUN.', 2.6);
@@ -203,9 +209,29 @@ export class Game {
     });
 
     this.buildGunViewmodel();
+    this.setupAiDebug();
     this.registerInteractables();
     this.syncPropVisibility();
     this.resetPlayerToStart();
+  }
+
+  /**
+   * Wire up the AI debug overlay, if this is a development build. The dynamic
+   * import keeps the module out of the release bundle entirely.
+   */
+  private setupAiDebug(): void {
+    if (import.meta.env.VITE_DEBUG_API !== '1') return;
+    void import('./aidebug').then(({ AiDebug }) => {
+      const dbg = new AiDebug(this.uiRoot);
+      this.aiDebug = dbg;
+      this.scene.add(dbg.root);
+      window.addEventListener('keydown', (e) => {
+        if (e.code === 'F3') {
+          e.preventDefault();
+          dbg.toggle();
+        }
+      });
+    });
   }
 
   /** Rebuild everything that depends on the run's generated secrets. */
@@ -229,6 +255,7 @@ export class Game {
     this.scene.add(this.demon.group);
     this.demon.onCatch = () => this.onCaught();
     this.demon.extraLight = (x, y, z, out) => this.flares.sample(x, y, z, out);
+    this.demon.seed(this.run.seed);
     this.demon.onSpot = () => {
       this.audio.play('roar', this.demon.centre, 0.9);
       this.hud.toast(this.sprintTaught ? 'It has seen you.' : 'It has seen you. HOLD SHIFT TO RUN.', 2.6);
@@ -968,8 +995,12 @@ export class Game {
     const spot = this.props.hideSpots.find((h) => h.id === id);
     if (!spot) return;
     this.input.releaseAll();
+    // If it watched you climb in, it knows where you were - not that you are
+    // in there. It comes and looks at the spot.
+    const witnessed = this.demon.senses.sees;
     this.currentHideSpot = spot;
     this.player.enterHide(spot.cam, spot.yaw, spot.yawRange);
+    if (witnessed) this.demon.noteHidingObserved(this.player.x, this.player.z);
     this.hud.setHidden(spot.kind);
     this.audio.play('clunk', undefined, 0.35);
     if (!this.hideKindsSeen.has(spot.kind)) {
@@ -1167,7 +1198,6 @@ export class Game {
   step(dt: number): void {
     const d = Math.min(dt, 1 / 20);
     this.time += d;
-    this.loudThisTick = false;
 
     if (this.phase === 'play' || this.phase === 'reading' || this.phase === 'puzzle') {
       this.run.elapsed += d;
@@ -1187,7 +1217,18 @@ export class Game {
     // The demon runs in `play` and in `reading` (reading is not a safe haven),
     // is suspended during puzzles, and is frozen entirely in menus/endings.
     if (this.phase === 'play' || this.phase === 'reading' || this.phase === 'puzzle') {
-      this.demon.update(d, this.grid, this.player, this.loudThisTick, this.player.hidden);
+      this.demon.update(
+        d,
+        this.grid,
+        {
+          x: this.player.x,
+          z: this.player.z,
+          speed: this.player.speed,
+          sprinting: this.player.sprinting,
+          floorY: this.grid.floorHeight(this.player.x, this.player.z),
+        },
+        this.player.hidden,
+      );
     }
 
     // Active-gameplay clocks. Deliberately not ticked in menus, endings or
@@ -1220,6 +1261,7 @@ export class Game {
     this.updateHud();
     this.updateAudio(d);
     this.animateWorld(d);
+    this.aiDebug?.update(this.demon, DEMON_SIGHT.fovDegrees, DEMON_SIGHT.range);
     this.render(d);
   }
 
@@ -1262,7 +1304,6 @@ export class Game {
     p.flares -= 1;
     p.flaresFired += 1;
     this.gunRecoil = 1;
-    this.loudThisTick = true;
     this.audio.play('flare_fire', undefined, 1);
     const flash = this.gunGroup.getObjectByName('muzzleflash');
     if (flash) flash.visible = true;
@@ -1620,7 +1661,7 @@ export class Game {
     const stateScale =
       this.demon.state === 'chase' || this.demon.state === 'attack'
         ? 1
-        : this.demon.state === 'investigate'
+        : this.demon.state === 'lostSight'
           ? 0.72
           : this.demon.state === 'reveal'
             ? 0.9
@@ -1959,6 +2000,29 @@ export class Game {
       }),
       pathExists: (ax: number, az: number, bx: number, bz: number) => !!this.grid.findPath(ax, az, bx, bz),
       sightClear: (ax: number, az: number, bx: number, bz: number) => this.grid.sightClear(ax, az, bx, bz),
+      setAiDebug: (on: boolean) => this.aiDebug?.setEnabled(on),
+      /** Drop the demon into a clean patrol with no knowledge of the player. */
+      beginPatrol: () => this.demon.beginPatrolNear(this.grid, this.demon.x, this.demon.z, true),
+      aiState: () => ({
+        state: this.demon.state,
+        sees: this.demon.senses.sees,
+        lostTimer: this.demon.lostTimer,
+        hasLastSeen: this.demon.hasLastSeen,
+        lastSeen: { x: this.demon.lastSeenX, z: this.demon.lastSeenZ },
+        patrolTarget: this.demon.patrolTarget,
+        suspended: this.demon.suspended,
+        alive: this.demon.alive,
+        distance: this.demon.senses.distance,
+        rays: this.demon.senses.rays.map((r) => ({ clear: r.clear, inCone: r.inCone })),
+        x: this.demon.x,
+        z: this.demon.z,
+        yaw: this.demon.yaw,
+      }),
+      /** Point the demon at a world position, for detection tests. */
+      faceDemonAt: (x: number, z: number) => {
+        this.demon.yaw = Math.atan2(x - this.demon.x, z - this.demon.z);
+      },
+      demonSight: () => ({ ...DEMON_SIGHT }),
       /** Walking distance along the real path between two points, in units. */
       pathLength: (ax: number, az: number, bx: number, bz: number) => {
         const p = this.grid.findPath(ax, az, bx, bz);
@@ -2005,6 +2069,14 @@ export class Game {
         let foreignMaterials = 0;
         for (const root of [this.scene, this.overlayScene]) {
           root.traverse((o) => {
+            // The development AI visualisation is not release content - the
+            // release build does not contain the module at all, which the
+            // release gate asserts separately - so it is not audited here.
+            let p: THREE.Object3D | null = o;
+            while (p) {
+              if (p.name === 'ai-debug') return;
+              p = p.parent;
+            }
             const m = o as THREE.Mesh;
             if (!m.isMesh) return;
             meshes++;

@@ -13,7 +13,8 @@
 
 import * as THREE from 'three';
 import type { Grid } from '../world/grid';
-import { PATROL, cx, cz } from '../world/layout';
+import { PATROL_NODES, DEMON_SIGHT, LOST_SIGHT_SECONDS, cx, cz } from '../world/layout';
+import { Rng } from '../core/rng';
 import { SURFACE, flatTexture } from '../world/textures';
 import { PAL } from '../world/palette';
 import type { PsxRenderer } from '../render/psx';
@@ -23,9 +24,10 @@ export type DemonState =
   | 'dormant'
   | 'reveal'
   | 'patrol'
-  | 'investigate'
+  /** Saw the player and is on them. */
   | 'chase'
-  | 'search'
+  /** Lost sight; heading for the last place it actually saw them. */
+  | 'lostSight'
   | 'attack'
   /** On fire and leaving. Plays out, then goes to `absent`. */
   | 'burning'
@@ -35,7 +37,6 @@ export type DemonState =
 
 export const DEMON_RADIUS = 0.5;
 const SPEED_PATROL = 2.35;
-const SPEED_INVESTIGATE = 3.2;
 /**
  * Chase speed, and the most important number in the game.
  *
@@ -56,21 +57,23 @@ const SPEED_INVESTIGATE = 3.2;
  * asserts that ordering so it cannot drift.
  */
 export const SPEED_CHASE = 5.0;
-const SIGHT_RANGE = 34;
-const SIGHT_HALF_ANGLE = Math.cos(THREE.MathUtils.degToRad(55));
 const CATCH_DISTANCE = 1.55;
 const ATTACK_WINDUP = 0.42;
-const MEMORY_TIME = 5.0;
-const SEARCH_TIME = 13.0;
 const REPATH_INTERVAL = 0.33;
+/** How long it dwells at a patrol node before choosing the next one. */
+const PAUSE_HALL = 0.35;
+const PAUSE_INTERSECTION = 1.6;
+const PAUSE_ROOM = 1.0;
 
 export interface DemonSenses {
   /** True if the demon can currently see the player. */
   sees: boolean;
-  /** Straight-line distance to the player. */
+  /** Straight-line distance to the player. Informational only. */
   distance: number;
   /** 0..1 how worked up it is; drives audio and the HUD cue. */
   agitation: number;
+  /** Per-body-point results from the last detection check, for the debug view. */
+  rays: Array<{ x: number; y: number; z: number; clear: boolean; inCone: boolean }>;
 }
 
 export class Demon {
@@ -89,11 +92,6 @@ export class Demon {
   private path: Array<{ x: number; z: number }> = [];
   private pathIndex = 0;
   private repathTimer = 0;
-  private patrolIndex = 0;
-  private lastKnownX = 0;
-  private lastKnownZ = 0;
-  private memoryTimer = 0;
-  private searchTimer = 0;
   private revealTimer = 0;
   private attackTimer = 0;
   private walkPhase = 0;
@@ -102,9 +100,28 @@ export class Demon {
   private stuckTimer = 0;
   private lastX = 0;
   private lastZ = 0;
-  private wanderTarget: { x: number; z: number } | null = null;
 
-  readonly senses: DemonSenses = { sees: false, distance: 999, agitation: 0 };
+  readonly senses: DemonSenses = { sees: false, distance: 999, agitation: 0, rays: [] };
+
+  // --- what it knows ----------------------------------------------------
+  /**
+   * The last position it *saw* the player at. This is the only channel through
+   * which the player's position reaches the demon: there is deliberately no
+   * hearing model and nothing hands it a live position.
+   */
+  lastSeenX = 0;
+  lastSeenZ = 0;
+  hasLastSeen = false;
+  /** Seconds of unbroken no-sight. Frozen while suspended. */
+  lostTimer = 0;
+
+  // --- patrol -----------------------------------------------------------
+  /** Node id it is walking to, or -1. */
+  patrolTarget = -1;
+  /** Per-node time-since-visited, used to weight the next choice. */
+  private visitAge: number[] = [];
+  private dwell = 0;
+  private scanYaw = 0;
 
   /** Fired once when the demon transitions into a chase; used for stingers. */
   onSpot: (() => void) | null = null;
@@ -125,6 +142,17 @@ export class Demon {
   private materials: THREE.ShaderMaterial[] = [];
   private eyeMat!: THREE.ShaderMaterial;
   private readonly tintColor = new THREE.Color();
+
+  /**
+   * Patrol choices are random, but seeded from the run - so a given run always
+   * hunts the same way and a failing route can be replayed.
+   */
+  private rng = new Rng(1);
+
+  /** Re-seed the patrol randomness. Called when a run starts. */
+  seed(seed: number): void {
+    this.rng = new Rng(seed ^ 0x5bd1e995);
+  }
 
   constructor(psx: PsxRenderer, private readonly wb: WorldBuild) {
     const skin = SURFACE.demonSkin();
@@ -272,15 +300,18 @@ export class Demon {
     this.grace = 0;
     this.path = [];
     this.pathIndex = 0;
-    this.memoryTimer = 0;
-    this.searchTimer = 0;
     this.revealTimer = 0;
     this.attackTimer = 0;
     this.deathTimer = 0;
     this.burnTimer = 0;
     this.stuckTimer = 0;
-    this.patrolIndex = 0;
-    this.wanderTarget = null;
+    this.lostTimer = 0;
+    this.hasLastSeen = false;
+    this.patrolTarget = -1;
+    this.visitAge = [];
+    this.dwell = 0;
+    this.patrolFailures = 0;
+    this.senses.rays.length = 0;
     this.senses.sees = false;
     this.senses.distance = 999;
     this.senses.agitation = 0;
@@ -353,8 +384,12 @@ export class Demon {
       m.transparent = false;
       (m.uniforms.uTint.value as THREE.Color).setRGB(1, 1, 1);
     }
+    // Comes back on patrol, with no idea where the player is. It has to see
+    // them again before it chases anything.
     this.state = 'patrol';
-    this.patrolIndex = this.nearestPatrolIndex();
+    this.hasLastSeen = false;
+    this.lostTimer = 0;
+    this.patrolTarget = -1;
     this.path = [];
     this.repathTimer = 0;
     this.grace = 1.5;
@@ -382,8 +417,7 @@ export class Demon {
   update(
     dt: number,
     grid: Grid,
-    player: { x: number; z: number; speed: number; sprinting: boolean },
-    loud: boolean,
+    player: { x: number; z: number; speed: number; sprinting: boolean; floorY: number },
     /**
      * The player is inside a hide spot. It keeps hunting, but it cannot see,
      * hear or reach them - so it runs down its memory, searches, and gives up.
@@ -452,19 +486,17 @@ export class Demon {
     const dist = Math.hypot(dx, dz);
     this.senses.distance = dist;
 
-    // --- senses ---------------------------------------------------------
-    let perceives = false;
-    if (!playerHidden && dist < SIGHT_RANGE && grid.sightClear(this.x, this.z, player.x, player.z)) {
-      const fx = Math.sin(this.yaw);
-      const fz = Math.cos(this.yaw);
-      const dot = (dx * fx + dz * fz) / (dist || 1);
-      // Very close, it notices regardless of facing.
-      if (dot > SIGHT_HALF_ANGLE || dist < 3.5) perceives = true;
+    // --- sight ----------------------------------------------------------
+    // The only sense it has. No hearing: nothing but a successful visual
+    // detection ever tells it where the player is.
+    const sees = playerHidden ? false : this.look(grid, player.x, player.z, player.floorY);
+    this.senses.sees = sees;
+    if (sees) {
+      this.lastSeenX = player.x;
+      this.lastSeenZ = player.z;
+      this.hasLastSeen = true;
+      this.lostTimer = 0;
     }
-    this.senses.sees = perceives;
-
-    const hearRadius = playerHidden ? 0 : loud ? 220 : player.sprinting ? 30 : player.speed > 0.6 ? 15 : 0;
-    const hears = hearRadius > 0 && dist < hearRadius;
 
     if (this.state === 'reveal') {
       this.revealTimer -= dt;
@@ -472,7 +504,12 @@ export class Demon {
       this.walkPhase += dt * 1.2;
       this.senses.agitation = 1;
       if (this.revealTimer <= 0) {
-        this.enterChase(player.x, player.z);
+        // The reveal is a scripted sighting: it has been looking at the player
+        // the whole time, so it goes straight into a chase.
+        this.lastSeenX = player.x;
+        this.lastSeenZ = player.z;
+        this.hasLastSeen = true;
+        this.enterChase();
       }
       this.animatePose(0, dt);
       this.applyTransform();
@@ -480,25 +517,10 @@ export class Demon {
       return;
     }
 
-    if (perceives) {
-      if (this.state !== 'chase' && this.state !== 'attack') {
-        this.enterChase(player.x, player.z);
-        this.onSpot?.();
-      }
-      this.lastKnownX = player.x;
-      this.lastKnownZ = player.z;
-      this.memoryTimer = MEMORY_TIME;
-    } else if (hears) {
-      this.lastKnownX = player.x;
-      this.lastKnownZ = player.z;
-      if (this.state === 'patrol' || this.state === 'search') {
-        this.state = 'investigate';
-        this.memoryTimer = MEMORY_TIME;
-        this.path = [];
-        this.repathTimer = 0;
-      } else if (this.state === 'chase') {
-        this.memoryTimer = MEMORY_TIME;
-      }
+    // Seeing the player always starts or continues a chase.
+    if (sees && this.state !== 'chase' && this.state !== 'attack') {
+      this.enterChase();
+      this.onSpot?.();
     }
 
     // --- state machine --------------------------------------------------
@@ -508,80 +530,67 @@ export class Demon {
     switch (this.state) {
       case 'chase': {
         speed = SPEED_CHASE;
-        this.memoryTimer -= dt;
-        goal = perceives ? { x: player.x, z: player.z } : { x: this.lastKnownX, z: this.lastKnownZ };
         this.senses.agitation = 1;
-        if (!perceives && this.memoryTimer <= 0) {
-          this.state = 'search';
-          this.searchTimer = SEARCH_TIME;
-          this.wanderTarget = null;
+        if (sees) {
+          goal = { x: this.lastSeenX, z: this.lastSeenZ };
+          if (dist < CATCH_DISTANCE && this.grace <= 0 && !playerHidden && this.canReach(grid, player.x, player.z, player.floorY)) {
+            this.state = 'attack';
+            this.attackTimer = ATTACK_WINDUP;
+          }
+        } else {
+          // Sight just broke. Head for where they actually were and start the
+          // clock; it keeps looking on the way via the normal sight check.
+          this.state = 'lostSight';
+          this.lostTimer = 0;
           this.path = [];
           this.repathTimer = 0;
         }
-        if (dist < CATCH_DISTANCE && this.grace <= 0 && !playerHidden) {
-          this.state = 'attack';
-          this.attackTimer = ATTACK_WINDUP;
+        break;
+      }
+
+      case 'lostSight': {
+        speed = SPEED_CHASE * 0.86;
+        this.senses.agitation = 0.7;
+        this.lostTimer += dt;
+        goal = this.hasLastSeen ? { x: this.lastSeenX, z: this.lastSeenZ } : null;
+
+        // Sweep its head as it goes, so corners come into the cone.
+        this.scanYaw += dt * 2.1;
+
+        if (this.lostTimer >= LOST_SIGHT_SECONDS) {
+          // Give up, wherever it got to - reaching the last seen position is
+          // explicitly not required.
+          this.beginPatrolNear(grid, this.hasLastSeen ? this.lastSeenX : this.x, this.hasLastSeen ? this.lastSeenZ : this.z);
         }
         break;
       }
+
       case 'attack': {
         speed = 0;
         this.attackTimer -= dt;
         this.yaw = approachAngle(this.yaw, Math.atan2(dx, dz), dt * 12);
         this.senses.agitation = 1;
         if (this.attackTimer <= 0) {
-          if (dist < CATCH_DISTANCE + 0.7 && this.grace <= 0 && !playerHidden) {
+          if (
+            dist < CATCH_DISTANCE + 0.7 &&
+            this.grace <= 0 &&
+            !playerHidden &&
+            this.canReach(grid, player.x, player.z, player.floorY)
+          ) {
             this.onCatch?.();
           }
-          this.state = 'chase';
-          this.memoryTimer = MEMORY_TIME;
+          this.state = sees ? 'chase' : 'lostSight';
+          if (!sees) this.lostTimer = 0;
         }
         break;
       }
-      case 'investigate': {
-        speed = SPEED_INVESTIGATE;
-        this.memoryTimer -= dt;
-        goal = { x: this.lastKnownX, z: this.lastKnownZ };
-        this.senses.agitation = 0.55;
-        const atGoal = Math.hypot(this.lastKnownX - this.x, this.lastKnownZ - this.z) < 1.6;
-        if (atGoal || this.memoryTimer <= 0) {
-          this.state = 'search';
-          this.searchTimer = SEARCH_TIME;
-          this.wanderTarget = null;
-          this.path = [];
-          this.repathTimer = 0;
-        }
-        break;
-      }
-      case 'search': {
-        speed = SPEED_INVESTIGATE * 0.82;
-        this.searchTimer -= dt;
-        this.senses.agitation = 0.4;
-        if (!this.wanderTarget || Math.hypot(this.wanderTarget.x - this.x, this.wanderTarget.z - this.z) < 1.4) {
-          this.wanderTarget = this.pickSearchSpot(grid);
-          this.path = [];
-          this.repathTimer = 0;
-        }
-        goal = this.wanderTarget;
-        if (this.searchTimer <= 0) {
-          this.state = 'patrol';
-          this.path = [];
-          this.repathTimer = 0;
-          this.patrolIndex = this.nearestPatrolIndex();
-        }
-        break;
-      }
+
       case 'patrol':
       default: {
         speed = SPEED_PATROL;
         this.senses.agitation = 0.12;
-        const wp = PATROL[this.patrolIndex];
-        goal = { x: cx(wp[0]), z: cz(wp[1]) };
-        if (Math.hypot(goal.x - this.x, goal.z - this.z) < 1.8) {
-          this.patrolIndex = (this.patrolIndex + 1) % PATROL.length;
-          this.path = [];
-          this.repathTimer = 0;
-        }
+        goal = this.patrolStep(dt, grid);
+        if (!goal) speed = 0;
         break;
       }
     }
@@ -602,43 +611,208 @@ export class Demon {
     this.enterChase(px, pz);
   }
 
-  private enterChase(px: number, pz: number): void {
-    this.state = 'chase';
-    this.lastKnownX = px;
-    this.lastKnownZ = pz;
-    this.memoryTimer = MEMORY_TIME;
-    this.path = [];
-    this.repathTimer = 0;
+  private dwellTurn = 0;
+  private patrolFailures = 0;
+
+  /**
+   * Visual detection. Checks several points up the player's body against the
+   * sight cone, the range, and a true 3D ray that walls, furniture and closed
+   * doors all stop.
+   *
+   * Several points rather than one because a single centre-of-mass ray makes
+   * detection around corners a coin toss: the demon either sees a whole person
+   * through a two-inch gap or misses one standing in the open.
+   */
+  private look(grid: Grid, px: number, pz: number, playerFloorY: number): boolean {
+    const eyeY = this.groundY + 2.06;
+    const dx = px - this.x;
+    const dz = pz - this.z;
+    const dist = Math.hypot(dx, dz);
+    this.senses.rays.length = 0;
+    if (dist > DEMON_SIGHT.range) return false;
+
+    const fwdX = Math.sin(this.yaw + this.scanOffset);
+    const fwdZ = Math.cos(this.yaw + this.scanOffset);
+    const cosHalf = Math.cos(THREE.MathUtils.degToRad(DEMON_SIGHT.fovDegrees / 2));
+    const dot = dist > 1e-4 ? (dx * fwdX + dz * fwdZ) / dist : 1;
+    const inCone = dot >= cosHalf || dist <= DEMON_SIGHT.peripheralRadius;
+
+    let any = false;
+    for (const h of DEMON_SIGHT.bodyPoints) {
+      const ty = playerFloorY + h;
+      const clear = grid.raySightClear(this.x, eyeY, this.z, px, ty, pz);
+      this.senses.rays.push({ x: px, y: ty, z: pz, clear, inCone });
+      if (clear && inCone) any = true;
+    }
+    return any;
   }
 
-  private nearestPatrolIndex(): number {
-    let best = 0;
+  /**
+   * A catch has to be physically plausible: close, and with something clear
+   * between the two of them at chest height. Without this it can claw through
+   * a workbench it is standing behind.
+   */
+  private canReach(grid: Grid, px: number, pz: number, playerFloorY: number): boolean {
+    return grid.raySightClear(this.x, this.groundY + 1.2, this.z, px, playerFloorY + 1.0, pz);
+  }
+
+  /** Where the demon's feet are, for eye-height maths. */
+  private get groundY(): number {
+    return 0;
+  }
+
+  /** Head sweep applied on top of body yaw while hunting. */
+  private get scanOffset(): number {
+    return this.state === 'lostSight' ? Math.sin(this.scanYaw) * 0.6 : 0;
+  }
+
+  // ------------------------------------------------------------- patrolling
+
+  /** Start patrolling, seeded at the node nearest `x,z`. */
+  beginPatrolNear(grid: Grid, x: number, z: number, forget = false): void {
+    this.state = 'patrol';
+    this.lostTimer = 0;
+    if (forget) this.hasLastSeen = false;
+    this.path = [];
+    this.repathTimer = 0;
+    this.dwell = 0;
+    this.ensureVisitAges();
+    // Make the area around the last sighting the freshest thing on its list,
+    // so its next route starts there and then broadens outward.
+    let best = -1;
     let bestD = Infinity;
-    for (let i = 0; i < PATROL.length; i++) {
-      const d = Math.hypot(cx(PATROL[i][0]) - this.x, cz(PATROL[i][1]) - this.z);
+    for (const n of PATROL_NODES) {
+      const d = Math.hypot(cx(n.gx) - x, cz(n.gz) - z);
       if (d < bestD) {
         bestD = d;
-        best = i;
+        best = n.id;
+      }
+    }
+    this.patrolTarget = best;
+    void grid;
+  }
+
+  private ensureVisitAges(): void {
+    if (this.visitAge.length === PATROL_NODES.length) return;
+    this.visitAge = PATROL_NODES.map(() => 30 + this.rng.next() * 30);
+  }
+
+  /**
+   * One tick of patrol. Returns the point to walk toward, or null while it is
+   * standing at a node looking around.
+   *
+   * Destination choice is weighted toward nodes it has not visited recently,
+   * preferring neighbours of where it is so the route reads as walking the
+   * building rather than teleporting attention across it.
+   */
+  private patrolStep(dt: number, grid: Grid): { x: number; z: number } | null {
+    this.ensureVisitAges();
+    for (let i = 0; i < this.visitAge.length; i++) this.visitAge[i] += dt;
+
+    if (this.patrolTarget < 0) {
+      this.patrolTarget = this.pickPatrolTarget(this.nearestNode());
+    }
+    const node = PATROL_NODES[this.patrolTarget];
+    const tx = cx(node.gx);
+    const tz = cz(node.gz);
+
+    if (Math.hypot(tx - this.x, tz - this.z) < 1.6) {
+      // Arrived. Mark it seen, dwell a moment, turn, then pick the next.
+      this.visitAge[node.id] = 0;
+      if (this.dwell <= 0) {
+        this.dwell =
+          node.kind === 'intersection' ? PAUSE_INTERSECTION : node.kind === 'room' ? PAUSE_ROOM : PAUSE_HALL;
+        this.dwellTurn = (this.rng.next() - 0.5) * (node.kind === 'intersection' ? 2.6 : 1.2);
+      }
+      this.dwell -= dt;
+      // Look around while it stands there - this is real detection, not idle
+      // animation, so standing in its view while it pauses is fatal.
+      this.yaw = approachAngle(this.yaw, this.yaw + this.dwellTurn, dt * 1.6);
+      if (this.dwell <= 0) {
+        this.patrolTarget = this.pickPatrolTarget(node.id);
+        this.path = [];
+        this.repathTimer = 0;
+      }
+      return null;
+    }
+
+    // Unreachable destination: drop it and take another.
+    if (this.patrolFailures > 2) {
+      this.patrolFailures = 0;
+      this.visitAge[node.id] = 0; // stop re-picking it immediately
+      this.patrolTarget = this.pickPatrolTarget(this.nearestNode());
+      this.path = [];
+      this.repathTimer = 0;
+      return null;
+    }
+    void grid;
+    return { x: tx, z: tz };
+  }
+
+  private nearestNode(): number {
+    let best = 0;
+    let bestD = Infinity;
+    for (const n of PATROL_NODES) {
+      const d = Math.hypot(cx(n.gx) - this.x, cz(n.gz) - this.z);
+      if (d < bestD) {
+        bestD = d;
+        best = n.id;
       }
     }
     return best;
   }
 
-  private pickSearchSpot(grid: Grid): { x: number; z: number } {
-    // Look around the last place the player was, not at random across the map.
-    for (let attempt = 0; attempt < 24; attempt++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = 4 + Math.random() * 14;
-      const tx = this.lastKnownX + Math.cos(a) * r;
-      const tz = this.lastKnownZ + Math.sin(a) * r;
-      const cell = grid.nearestWalkable(
-        Math.floor(tx / 3) + 32,
-        Math.floor(tz / 3) + 26,
-        2,
-      );
-      if (cell) return { x: cx(cell[0]), z: cz(cell[1]) };
+  /**
+   * Weighted pick: neighbours of `fromId` weighted by how long since each was
+   * visited, with a small chance of striking out for a distant stale node so
+   * it does not get stuck pacing one wing.
+   */
+  private pickPatrolTarget(fromId: number): number {
+    this.ensureVisitAges();
+    const from = PATROL_NODES[fromId];
+    const candidates = this.rng.next() < 0.18 ? PATROL_NODES.map((n) => n.id) : from.links;
+    let total = 0;
+    const weights: Array<{ id: number; w: number }> = [];
+    for (const id of candidates) {
+      if (id === fromId) continue;
+      // Age is the whole point: stale places are interesting.
+      const w = Math.pow(Math.max(0.1, this.visitAge[id]), 1.4);
+      weights.push({ id, w });
+      total += w;
     }
-    return { x: this.lastKnownX, z: this.lastKnownZ };
+    if (!weights.length) return from.links[0] ?? fromId;
+    let roll = this.rng.next() * total;
+    for (const c of weights) {
+      roll -= c.w;
+      if (roll <= 0) return c.id;
+    }
+    return weights[weights.length - 1].id;
+  }
+
+  /**
+   * It watched the player get into something. It does not know they are in
+   * there, only where they were when it lost them.
+   */
+  noteHidingObserved(x: number, z: number): void {
+    this.lastSeenX = x;
+    this.lastSeenZ = z;
+    this.hasLastSeen = true;
+    this.lostTimer = 0;
+    this.state = 'lostSight';
+    this.path = [];
+    this.repathTimer = 0;
+  }
+
+  private enterChase(px?: number, pz?: number): void {
+    this.state = 'chase';
+    if (px !== undefined && pz !== undefined) {
+      this.lastSeenX = px;
+      this.lastSeenZ = pz;
+      this.hasLastSeen = true;
+    }
+    this.lostTimer = 0;
+    this.path = [];
+    this.repathTimer = 0;
   }
 
   private steer(dt: number, grid: Grid, goal: { x: number; z: number }, speed: number): void {

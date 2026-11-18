@@ -331,6 +331,52 @@ export class Grid {
     ).clear;
   }
 
+  /**
+   * True line of sight in three dimensions: walls, and anything solid standing
+   * in the way - furniture, machinery, and the front door while it is shut.
+   *
+   * `sightClear` only consults the cell grid, so it happily sees straight
+   * through a workbench or a closed door. Detection has to use this instead,
+   * or the demon spots the player through the exit it has not opened.
+   */
+  raySightClear(
+    x0: number,
+    y0: number,
+    z0: number,
+    x1: number,
+    y1: number,
+    z1: number,
+  ): boolean {
+    // Architecture first: cheap, and rejects most rays.
+    if (!this.sightClear(x0, z0, x1, z1)) return false;
+
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const dz = z1 - z0;
+    const len = Math.hypot(dx, dz);
+    if (len < 1e-6) return true;
+
+    // Then anything solid along the way. Walk the cells the segment crosses
+    // and test only the blockers indexed to them.
+    const steps = Math.max(1, Math.ceil(len / (TILE * 0.5)));
+    const seen = new Set<Aabb>();
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const gx = gxOf(x0 + dx * t);
+      const gz = gzOf(z0 + dz * t);
+      if (!this.inBounds(gx, gz)) continue;
+      const bucket = this.blockerIndex[gz * GW + gx];
+      if (!bucket) continue;
+      for (const b of bucket) {
+        if (b.top <= 0.35) continue; // low enough to see over
+        if (seen.has(b)) continue;
+        seen.add(b);
+        if (segmentHitsBox(x0, y0, z0, dx, dy, dz, b)) return false;
+      }
+    }
+    return true;
+  }
+
   /** Distance along the ray until the first opaque cell, or `max`. */
   rayHitDistance(x0: number, z0: number, dirX: number, dirZ: number, max: number): number {
     const r = this.march(x0, z0, x0 + dirX * max, z0 + dirZ * max, (gx, gz) => this.isOpaque(gx, gz));
@@ -557,6 +603,40 @@ export class Grid {
     }
     return top;
   }
+}
+
+/**
+ * Slab test of a segment against an axis-aligned box that spans y = 0..top.
+ * Used for sight occlusion by furniture and closed doors.
+ */
+function segmentHitsBox(
+  x: number,
+  y: number,
+  z: number,
+  dx: number,
+  dy: number,
+  dz: number,
+  b: Aabb,
+): boolean {
+  let tMin = 0;
+  let tMax = 1;
+  const axis = (origin: number, delta: number, lo: number, hi: number): boolean => {
+    if (Math.abs(delta) < 1e-9) return origin >= lo && origin <= hi;
+    let t0 = (lo - origin) / delta;
+    let t1 = (hi - origin) / delta;
+    if (t0 > t1) {
+      const tmp = t0;
+      t0 = t1;
+      t1 = tmp;
+    }
+    tMin = Math.max(tMin, t0);
+    tMax = Math.min(tMax, t1);
+    return tMax >= tMin;
+  };
+  if (!axis(x, dx, b.minX, b.maxX)) return false;
+  if (!axis(z, dz, b.minZ, b.maxZ)) return false;
+  if (!axis(y, dy, -0.2, b.top)) return false;
+  return true;
 }
 
 const DIRS: ReadonlyArray<readonly [number, number]> = [

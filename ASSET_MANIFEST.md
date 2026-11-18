@@ -165,6 +165,8 @@ no clips, no skinning):
 | `death` | `dead` | Falls forward over 1.5 s, then fades over 0.9 s, hidden at 2.4 s |
 | `burn` | `burning` | Hit by a flare: emissive flares to 1.6 ±0.5 at 40 Hz, stride triples, it runs directly away from the player at 7 u/s while scaling to 0.1 and fading to nothing over 1.6 s |
 | `absent` | `absent` | Off the board on a flare budget. Hidden, unperceiving, unhittable |
+| `dwell` | `patrol`, at a node | Stands and turns through up to ±1.3 rad at an intersection, less in a corridor. It is looking while it does this, not idling |
+| `scan` | `lostSight` | Head sweeps ±0.6 rad at ~2 rad/s on top of body yaw, so corners pass through the sight cone on the way to the last seen position |
 
 ### 3.8 Ending stills — 3 assets
 

@@ -6,7 +6,7 @@ driven in headless Chromium 159 (SwiftShader software GL).
 Reproduce everything here with:
 
 ```bash
-npm test                 # 18 routes, 431 checks
+npm test                 # 19 routes, 518 checks
 node test/vantages.mjs   # 24 in-world screenshots
 node test/ui-shots.mjs   # 24 interface screenshots
 ```
@@ -15,7 +15,7 @@ node test/ui-shots.mjs   # 24 interface screenshots
 
 ## 1. Result summary
 
-**431 / 431 checks passed across 18 routes. All three endings verified.**
+**518 / 518 checks passed across 19 routes. All three endings verified.**
 
 | Route | What it plays | Result |
 |---|---|---|
@@ -37,6 +37,7 @@ node test/ui-shots.mjs   # 24 interface screenshots
 | 16 | Flare hit: 60 active seconds, paused by panels, Bad Ending while absent | ✓ |
 | 17 | Two keys, two locks, and the cross collected exactly once | ✓ |
 | 18 | The ritual kills permanently from every demon state | ✓ |
+| 19 | Hunting: sight-only detection, patrol, pursuit, lost sight | ✓ |
 
 How the harness plays: it picks real menu choices, presses real puzzle
 controls, walks with the real collision code and fires with the real hit check.
@@ -192,6 +193,50 @@ The special gun was replaced wholesale. What changed, and what it cost:
 5. **A dead texture generator survived the refactor** (`surf.prop.gunmetal`).
    Route 10's release audit failed the build until it was removed — which is
    exactly what that audit is for.
+
+---
+
+## 1c. Feature round: the hunting system
+
+The demon's senses and state machine were rewritten.
+
+- **Sight is now its only sense.** The hearing model is gone entirely: sprinting
+  no longer draws it, and nothing hands it a live player position. Detection is
+  a configurable cone, a max range, and a **true 3D ray** — the old check only
+  consulted the cell grid, so it could see straight through a workbench or the
+  closed front door. It now tests the blocker boxes in 3D as well, and checks
+  three heights up the player's body rather than one centre-of-mass point.
+- **Patrol is a graph**, not a ring: 32 nodes across halls, intersections and
+  rooms, with real adjacency, chosen by weight on time-since-visited, with
+  dwell-and-turn at junctions. It keeps looking while it dwells.
+- **`investigate` and `search` are gone**, replaced by a single `lostSight`
+  state with the five-second clock the brief specifies. Giving up does not
+  require reaching the last seen position.
+- **Patrol randomness is seeded from the run seed**, so a given run hunts the
+  same way every time and a failing route can be replayed. It was
+  `Math.random()`, which made route 19 report different failures on consecutive
+  runs — unusable as a regression test.
+- **Dev-only visualisation** (F3): sight cone, per-body-point rays coloured by
+  blocked/out-of-cone/clear, last seen marker, patrol destination, the whole
+  patrol graph, and a readout of state and the lost-sight timer. Loaded through
+  a dynamic import behind the build flag, so the release contains neither the
+  module nor an extra chunk — the release gate asserts both.
+
+### Defects found while building it
+
+1. **My own release-gate check produced a false positive.** The asset audit has
+   to skip the debug group, which put the literal `ai-debug` in the release
+   bundle and tripped the check looking for it. Narrowed to strings that exist
+   only inside the dev module.
+2. **Two test-staging bugs of my own**, both worth recording because both
+   produced plausible-looking failures: the scripted walker was being killed
+   mid-way through a long collection walk by a live patrol, so every later
+   assertion ran in the death phase; and the demon's facing drifted onto the
+   player between sampling steps, so a "cannot see behind itself" check failed
+   for the wrong reason.
+3. **Pause-clock measurements were off by a frame or two** in two routes,
+   because they sampled before the pause took effect. Both now measure strictly
+   from inside the paused state.
 
 ---
 
@@ -394,6 +439,28 @@ cannot be trusted).
 | The **steel** key opens the breaker cabinet | ✓ |
 | The cross can be collected exactly once | gone from the world; re-using does nothing |
 | Both keys and the cross survive the checkpoint | ✓ |
+
+### Route 19 — The hunting system
+
+All nine required scenarios, plus the configuration and the patrol itself.
+FOV 110°, range 34, body points at 1.55 / 1.0 / 0.35 above the floor.
+
+| Scenario | Result |
+|---|---|
+| Field of view, range and body points are configurable | ✓, read from `DEMON_SIGHT` |
+| It starts on patrol knowing nothing about the player | ✓ |
+| It explores | reached **3+ distinct patrol destinations** over 80 simulated seconds without ever seeing the player |
+| **Exit hiding with no line of sight** | never chases over 5 s; still knows nothing |
+| **Exit hiding directly behind it**, outside its cone | not detected across 90 consecutive single-frame checks with its facing held |
+| **Enter its unobstructed cone** | detected, chase begins, last seen set |
+| A wall between them | not detected |
+| **Break sight round a corner** | switches to `lostSight`, destination is where it last *saw* the player |
+| **Move elsewhere while concealed** | destination stays at the last observation, not the new position |
+| **Unseen for more than five seconds** | gives up → `patrol`, timer peaked at the 5 s threshold, new route seeded near the sighting |
+| **Visible again inside five seconds** | resumes the chase and the timer resets to **0** |
+| **Use a panel during pursuit** | lost-sight timer **0.000 → 0.000 over 10 simulated seconds**; demon suspended; timer resumes on exit |
+| **Banish with a flare** | returns as `patrol` with **no knowledge of the player** |
+| **Complete the ritual** | standing in full view of it does nothing; `dead`, no pending return |
 
 ### Route 18 — The ritual, from every demon state
 
